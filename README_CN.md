@@ -4,12 +4,12 @@
   <code>&nbsp;█▀█ █▄█ █▄█ █&nbsp;█&nbsp;</code>
   <br />
   <br />
-  <strong>Serverless for AI Agents</strong>
+  <strong>AI Agent 的 Serverless 平台</strong>
   <br />
-  <sub>Define workflows in markdown. Execute in sandboxes. Collect artifacts automatically.</sub>
+  <sub>用 Markdown 定义工作流，在沙箱中执行，自动收集产出物。</sub>
   <br />
   <br />
-  <a href="./README_CN.md">中文</a> · English
+  <a href="./README.md">English</a> · 中文
   <br />
   <br />
   <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go" alt="Go Version" /></a>
@@ -19,53 +19,53 @@
 
 ---
 
-**ABox** takes a natural-language agent definition (`AGENTS.md`) and executes it inside an isolated container — Docker or Kubernetes. No SDK. No boilerplate. Just markdown in, results out.
+**ABox** 接收一个自然语言编写的 Agent 定义文件（`AGENTS.md`），在隔离容器中执行 — Docker 或 Kubernetes。无需 SDK，无需样板代码，Markdown 进，结果出。
 
-## Features
+## 特性
 
-- 🧊 **Sandboxed Execution** — Every run spins up a fresh container (Docker or K8s Job)
-- 📝 **Markdown-Native** — Define agents in plain `AGENTS.md` files, no SDK required
-- 🔌 **Pluggable Backends** — Swap executors, stores, and storage via config
-- 🖥️ **Web Dashboard** — Next.js UI to create, monitor, and inspect runs
-- ⚡ **Async by Design** — Submit and poll; runs execute in background goroutines
-- 🗄️ **Persistent History** — SQLite (default), PostgreSQL, or in-memory store
-- 📦 **Artifact Storage** — Local filesystem or S3-compatible object storage
-- 🔒 **Timeout & Cancellation** — Context-based enforcement with per-run controls
-- 🛠️ **CLI + REST API** — Full control from terminal or HTTP
+- 🧊 **沙箱执行** — 每次运行启动全新容器（Docker 或 K8s Job）
+- 📝 **Markdown 原生** — 用 `AGENTS.md` 定义 Agent，不需要任何 SDK
+- 🔌 **可插拔后端** — 执行器、存储、制品存储全部可通过配置切换
+- 🖥️ **Web 管理台** — Next.js 仪表盘，创建、监控、查看运行详情
+- ⚡ **异步设计** — 提交即返回，后台协程执行
+- 🗄️ **持久化历史** — 默认 SQLite，可选 PostgreSQL 或内存
+- 📦 **制品存储** — 本地文件系统或 S3 兼容对象存储
+- 🔒 **超时与取消** — 基于 Context 的超时控制，支持运行中取消
+- 🛠️ **CLI + REST API** — 命令行和 HTTP 双通道
 
-## Quick Start
+## 快速开始
 
-### 1. Install
+### 1. 安装
 
 ```bash
 git clone https://github.com/jiusanzhou/agentbox.git && cd agentbox
 make
 ```
 
-This builds `bin/agentbox` (server) and `bin/agentboxctl` (CLI).
+构建产物：`bin/agentbox`（服务端）和 `bin/agentboxctl`（CLI 客户端）。
 
-### 2. Configure
+### 2. 配置
 
 ```bash
 cp config.yaml config.local.yaml
-# defaults work out of the box — edit only if needed
+# 默认配置开箱即用，按需修改
 ```
 
-### 3. Run
+### 3. 运行
 
 ```bash
-# start server
+# 启动服务
 ./bin/agentbox --config config.yaml
 
-# submit an agent workflow
+# 提交一个 Agent 工作流
 ./bin/agentboxctl run examples/hn-curator/AGENTS.md
 
-# check status
+# 查看状态
 ./bin/agentboxctl list
 ./bin/agentboxctl get <run-id>
 ```
 
-## Architecture
+## 架构
 
 ```
                     ┌──────────────────────────┐
@@ -84,7 +84,7 @@ cp config.yaml config.local.yaml
                                  ▼
                     ┌──────────────────────────┐
                     │         Engine            │
-                    │  (scheduling + lifecycle) │
+                    │    (调度 + 生命周期管理)    │
                     └──┬─────────┬──────────┬──┘
                        │         │          │
               ┌────────▼──┐ ┌───▼────┐ ┌───▼──────┐
@@ -101,89 +101,70 @@ cp config.yaml config.local.yaml
               └────────────────┘
 ```
 
-## Agent Definition
+## Agent 定义格式
 
-Agents are defined in a simple markdown format called `AGENTS.md`:
+Agent 用简单的 Markdown 文件（`AGENTS.md`）定义：
 
 ```markdown
-# HN Curator
+# HN 策展
 
 ## Instructions
-You are a Hacker News curator. Browse the front page,
-pick the top 5 most interesting stories, and write a
-concise digest.
+你是一个 Hacker News 策展人。浏览首页，
+挑选最有趣的 5 个故事，撰写精简摘要。
 
 ## Workflow
-- Fetch https://news.ycombinator.com
-- Analyze and rank stories by technical interest
-- Write output to `output/digest.md`
+- 抓取 https://news.ycombinator.com
+- 按技术价值分析和排序
+- 输出到 `output/digest.md`
 
 ## Guidelines
-- Focus on technical and scientific content
-- Keep summaries under 3 sentences each
-
-## Skills
-- web_browsing
-- markdown_writing
+- 聚焦技术和科学内容
+- 每篇摘要不超过 3 句话
 ```
 
-## Configuration
+## 配置
 
 ```yaml
-# Store backend: memory | sqlite | postgres
+# 存储后端：memory | sqlite | postgres
 store:
   type: sqlite
   config:
     path: ./data/agentbox.db
 
-# Artifact storage: local | s3
+# 制品存储：local | s3
 storage:
   type: local
   config:
     root: ./data/artifacts
 
-# Executor: docker | kubernetes
+# 执行器：docker | kubernetes
 executor:
   type: docker
   config:
     image: agentbox-sandbox:latest
 
-# Server transport
+# 服务端传输
 server:
   type: http
   config:
     addr: ":8080"
 ```
 
-## API Reference
+## API 参考
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/v1/run` | Submit a new agent run |
-| `GET` | `/api/v1/run/:id` | Get run details and result |
-| `GET` | `/api/v1/runs` | List runs (`limit`, `offset`) |
-| `DELETE` | `/api/v1/run/:id` | Cancel a running execution |
-| `GET` | `/api/v1/healthz` | Health check |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/v1/run` | 提交新的 Agent 运行 |
+| `GET` | `/api/v1/run/:id` | 获取运行详情和结果 |
+| `GET` | `/api/v1/runs` | 运行列表（支持分页） |
+| `DELETE` | `/api/v1/run/:id` | 取消运行中的任务 |
+| `GET` | `/api/v1/healthz` | 健康检查 |
 
-**Create Run:**
+## 可插拔后端
 
-```json
-{
-  "name": "hn-curator",
-  "agent_file": "# HN Curator\n\n## Instructions\n...",
-  "config": {
-    "image": "agentbox-sandbox:latest",
-    "timeout": 3600,
-    "env": { "API_KEY": "sk-..." }
-  }
-}
-```
+所有后端基于 `go.zoe.im/x` 的工厂模式实现。添加自定义后端只需三步：
 
-## Pluggable Backends
-
-All backends use the factory pattern powered by `go.zoe.im/x`. Adding a custom executor, store, or storage:
-
-**1. Implement the interface**
+**1. 实现接口**
 
 ```go
 type MyExecutor struct{}
@@ -193,7 +174,7 @@ func (e *MyExecutor) Logs(ctx context.Context, id string) (string, error) { ... 
 func (e *MyExecutor) Stop(ctx context.Context, id string) error { ... }
 ```
 
-**2. Register the factory**
+**2. 注册工厂**
 
 ```go
 func init() {
@@ -205,7 +186,7 @@ func init() {
 }
 ```
 
-**3. Use it in config**
+**3. 配置使用**
 
 ```yaml
 executor:
@@ -214,38 +195,36 @@ executor:
     endpoint: https://my-service.example.com
 ```
 
-The same pattern applies to `store.Store` and `storage.Storage`.
+Store 和 Storage 同理。
 
-## Skill Marketplace
+## Skill 市场
 
-Browse and share reusable agent definitions at **[abox-skills](https://github.com/jiusanzhou/abox-skills)**.
+浏览和分享可复用的 Agent 工作流定义：**[abox-skills](https://github.com/jiusanzhou/abox-skills)**
 
-## Web Dashboard
+## Web 管理台
 
-ABox ships with a Next.js dashboard for managing runs visually.
+ABox 内置 Next.js 管理后台：
 
 ```bash
-cd web && npm install && npm run dev
+cd web && pnpm install && pnpm dev
 ```
 
-Set `ABOX_API_URL` to point to your server (defaults to `http://localhost:8080`).
+## 贡献
 
-## Contributing
+欢迎提交 Pull Request！
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Fork 仓库
+2. 创建特性分支（`git checkout -b feat/amazing-feature`）
+3. 提交改动（`git commit -m 'feat: add amazing feature'`）
+4. 推送分支（`git push origin feat/amazing-feature`）
+5. 发起 Pull Request
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feat/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feat/amazing-feature`)
-5. Open a Pull Request
-
-## License
+## 开源协议
 
 [MIT](./LICENSE)
 
 ---
 
 <p align="center">
-  Built with <a href="https://go.zoe.im/x"><code>go.zoe.im/x</code></a>
+  基于 <a href="https://go.zoe.im/x"><code>go.zoe.im/x</code></a> 构建
 </p>
