@@ -1,0 +1,8 @@
+bin/
+*.exe
+.env
+*.local
+vendor/
+data/
+bin/
+agentbox

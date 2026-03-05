@@ -1,0 +1,33 @@
+# AgentBox configuration
+
+debug: true
+addr: ":8080"
+
+# Talk server transport
+server:
+  type: http
+  config:
+    addr: ":8080"
+    swagger:
+      enabled: true
+      path: /swagger
+      title: AgentBox API
+      version: "0.1.0"
+
+# Store backend: memory | sqlite | postgres
+store:
+  type: sqlite
+  config:
+    path: ./data/agentbox.db
+
+# Artifact storage: local | s3
+storage:
+  type: local
+  config:
+    root: ./data/artifacts
+
+# Executor: docker | kubernetes
+executor:
+  type: docker
+  config:
+    image: agentbox-sandbox:latest
