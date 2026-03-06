@@ -150,7 +150,7 @@ var cancelCmd = cli.New(
 )
 
 func main() {
-	cmd.Register(runCmd, listCmd, getCmd, cancelCmd, chatCmd)
+	cmd.Register(runCmd, listCmd, getCmd, cancelCmd, chatCmd, sessionCmd)
 	if err := cmd.Run(); err != nil {
 		os.Exit(1)
 	}
