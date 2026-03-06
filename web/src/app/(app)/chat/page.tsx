@@ -176,10 +176,10 @@ export default function ChatPage() {
                   )}
                 >
                   <p className="font-medium truncate">
-                    {s.system_prompt ? s.system_prompt.slice(0, 30) : `Session ${s.id.slice(0, 8)}`}
+                    {s.system_prompt ? s.system_prompt.slice(0, 30) : `Session ${(s.id || '').slice(0, 8)}`}
                   </p>
                   <p className="text-xs opacity-60 mt-0.5">
-                    {new Date(s.created_at).toLocaleDateString()}
+                    {s.created_at ? new Date(s.created_at).toLocaleDateString() : ""}
                   </p>
                 </button>
               ))}
