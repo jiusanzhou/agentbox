@@ -11,7 +11,6 @@ import (
 	osExec "os/exec"
 	"os/signal"
 	"strings"
-	"sync"
 	"time"
 	"syscall"
 
@@ -161,7 +160,6 @@ var chatCmd = cli.New(
 			scanner := bufio.NewScanner(stdout)
 			scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
-			var once sync.Once
 			hasOutput := false
 
 			for scanner.Scan() {
@@ -170,33 +168,37 @@ var chatCmd = cli.New(
 					continue
 				}
 
-				var event struct {
-					Type  string `json:"type"`
-					Event struct {
-						Type  string `json:"type"`
-						Delta struct {
-							Type string `json:"type"`
-							Text string `json:"text"`
-						} `json:"delta"`
-					} `json:"event"`
-					Result string `json:"result"`
-				}
-
+				var event map[string]interface{}
 				if err := json.Unmarshal([]byte(line), &event); err != nil {
 					continue
 				}
 
-				switch event.Type {
-				case "stream_event":
-					if event.Event.Type == "content_block_delta" && event.Event.Delta.Type == "text_delta" {
-						fmt.Print(event.Event.Delta.Text)
-						hasOutput = true
+				eventType, _ := event["type"].(string)
+
+				switch eventType {
+				case "assistant":
+					// Claude Code stream-json: assistant message with content array
+					if msg, ok := event["message"].(map[string]interface{}); ok {
+						if contents, ok := msg["content"].([]interface{}); ok {
+							for _, c := range contents {
+								if cm, ok := c.(map[string]interface{}); ok {
+									if cm["type"] == "text" {
+										if text, ok := cm["text"].(string); ok {
+											fmt.Print(text)
+											hasOutput = true
+										}
+									}
+								}
+							}
+						}
 					}
 				case "result":
-					if !hasOutput && event.Result != "" {
-						once.Do(func() {
-							fmt.Print(event.Result)
-						})
+					// Final result with complete text
+					if !hasOutput {
+						if result, ok := event["result"].(string); ok && result != "" {
+							fmt.Print(result)
+							hasOutput = true
+						}
 					}
 				}
 			}
