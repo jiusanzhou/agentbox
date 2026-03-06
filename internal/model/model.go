@@ -25,6 +25,7 @@ const (
 // Run represents a single agent workflow execution.
 type Run struct {
 	ID        string     `json:"id"`
+	UserID    string     `json:"user_id,omitempty"`
 	Name      string     `json:"name"`
 	Mode      RunMode    `json:"mode"`
 	Status    RunStatus  `json:"status"`

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"go.zoe.im/agentbox/internal/channel"
+	"go.zoe.im/agentbox/internal/auth"
 	"go.zoe.im/agentbox/internal/config"
 	"go.zoe.im/agentbox/internal/engine"
 	"go.zoe.im/agentbox/internal/executor"
@@ -38,6 +39,7 @@ type Service struct {
 	storage storage.Storage
 	server  *talk.Server
 	router  *channel.Router
+	auth    *auth.Auth
 	logger  *slog.Logger
 }
 
@@ -65,6 +67,12 @@ func New(cfg *config.Config) (*Service, error) {
 	// Create engine
 	eng := engine.New(s, exec, logger)
 
+	// Create auth (if enabled)
+	var authInst *auth.Auth
+	if cfg.Auth.Enabled {
+		authInst = auth.New(s, cfg.Auth.JWTSecret)
+	}
+
 	// Create talk server
 	server, err := talk.NewServerFromConfig(cfg.Server,
 		talk.WithPathPrefix("/api/v1"),
@@ -78,6 +86,7 @@ func New(cfg *config.Config) (*Service, error) {
 		engine:  eng,
 		storage: st,
 		server:  server,
+		auth:    authInst,
 		logger:  logger,
 	}
 
@@ -299,4 +308,91 @@ func (s *Service) StreamSessionMessage(w http.ResponseWriter, r *http.Request) {
 	data, _ := json.Marshal(map[string]string{"done": "true", "result": result})
 	fmt.Fprintf(w, "data: %s\n\n", data)
 	flusher.Flush()
+}
+
+// --- Auth endpoints ---
+
+type RegisterRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Name     string `json:"name"`
+}
+
+type RegisterResponse struct {
+	Token string      `json:"token"`
+	User  *model.User `json:"user"`
+}
+
+// CreateAuthRegister handles POST /auth/register
+func (s *Service) CreateAuthRegister(ctx context.Context, req *RegisterRequest) (*RegisterResponse, error) {
+	if s.auth == nil {
+		return nil, talk.NewError(talk.FailedPrecondition, "auth not enabled")
+	}
+	if req.Email == "" || req.Password == "" {
+		return nil, talk.NewError(talk.InvalidArgument, "email and password required")
+	}
+
+	user, err := s.auth.Register(ctx, req.Email, req.Password, req.Name)
+	if err != nil {
+		return nil, talk.NewError(talk.AlreadyExists, err.Error())
+	}
+
+	token, _, err := s.auth.Login(ctx, req.Email, req.Password)
+	if err != nil {
+		return nil, talk.NewError(talk.Internal, err.Error())
+	}
+
+	return &RegisterResponse{Token: token, User: user}, nil
+}
+
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type LoginResponse struct {
+	Token string      `json:"token"`
+	User  *model.User `json:"user"`
+}
+
+// CreateAuthLogin handles POST /auth/login
+func (s *Service) CreateAuthLogin(ctx context.Context, req *LoginRequest) (*LoginResponse, error) {
+	if s.auth == nil {
+		return nil, talk.NewError(talk.FailedPrecondition, "auth not enabled")
+	}
+
+	token, user, err := s.auth.Login(ctx, req.Email, req.Password)
+	if err != nil {
+		return nil, talk.NewError(talk.Unauthenticated, "invalid credentials")
+	}
+
+	return &LoginResponse{Token: token, User: user}, nil
+}
+
+// GetAuthMe handles GET /auth/me
+func (s *Service) GetAuthMe(ctx context.Context) (*model.User, error) {
+	user := auth.UserFromContext(ctx)
+	if user == nil {
+		return nil, talk.NewError(talk.Unauthenticated, "not authenticated")
+	}
+	return user, nil
+}
+
+type APIKeyResponse struct {
+	APIKey string `json:"api_key"`
+}
+
+// CreateAuthApikey handles POST /auth/apikey
+func (s *Service) CreateAuthApikey(ctx context.Context) (*APIKeyResponse, error) {
+	user := auth.UserFromContext(ctx)
+	if user == nil {
+		return nil, talk.NewError(talk.Unauthenticated, "not authenticated")
+	}
+
+	key, err := s.auth.GenerateAPIKey(ctx, user.ID)
+	if err != nil {
+		return nil, talk.NewError(talk.Internal, err.Error())
+	}
+
+	return &APIKeyResponse{APIKey: key}, nil
 }

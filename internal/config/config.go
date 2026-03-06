@@ -17,6 +17,9 @@ type Config struct {
 	Port  int32  `json:"port,omitempty" yaml:"port" opts:"env"`
 	Addr  string `json:"addr,omitempty" yaml:"addr" opts:"env"`
 
+	// Auth configuration
+	Auth AuthConfig `json:"auth,omitempty" yaml:"auth"`
+
 	// Store backend (memory, sqlite, postgres, etc.)
 	Store x.TypedLazyConfig `json:"store,omitempty" yaml:"store" opts:"-"`
 
@@ -36,6 +39,12 @@ type Config struct {
 func (c *Config) String() string {
 	data, _ := json.Marshal(c)
 	return string(data)
+}
+
+// AuthConfig holds authentication settings.
+type AuthConfig struct {
+	JWTSecret string `json:"jwt_secret,omitempty" yaml:"jwt_secret" opts:"env=ABOX_JWT_SECRET"`
+	Enabled   bool   `json:"enabled" yaml:"enabled"`
 }
 
 func NewConfig() *Config {

@@ -17,13 +17,15 @@ func init() {
 }
 
 type memoryStore struct {
-	mu   sync.RWMutex
-	runs map[string]*model.Run
+	mu    sync.RWMutex
+	runs  map[string]*model.Run
+	users map[string]*model.User
 }
 
 func New() store.Store {
 	return &memoryStore{
-		runs: make(map[string]*model.Run),
+		runs:  make(map[string]*model.Run),
+		users: make(map[string]*model.User),
 	}
 }
 
@@ -79,5 +81,61 @@ func (s *memoryStore) DeleteRun(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.runs, id)
+	return nil
+}
+
+// --- User methods ---
+
+func (s *memoryStore) CreateUser(_ context.Context, user *model.User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, u := range s.users {
+		if u.Email == user.Email {
+			return fmt.Errorf("user with email %s already exists", user.Email)
+		}
+	}
+	s.users[user.ID] = user
+	return nil
+}
+
+func (s *memoryStore) GetUser(_ context.Context, id string) (*model.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	user, ok := s.users[id]
+	if !ok {
+		return nil, fmt.Errorf("user %s not found", id)
+	}
+	return user, nil
+}
+
+func (s *memoryStore) GetUserByEmail(_ context.Context, email string) (*model.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.users {
+		if u.Email == email {
+			return u, nil
+		}
+	}
+	return nil, fmt.Errorf("user with email %s not found", email)
+}
+
+func (s *memoryStore) GetUserByAPIKey(_ context.Context, apiKeyHash string) (*model.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.users {
+		if u.APIKey == apiKeyHash {
+			return u, nil
+		}
+	}
+	return nil, fmt.Errorf("user not found")
+}
+
+func (s *memoryStore) UpdateUser(_ context.Context, user *model.User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.users[user.ID]; !exists {
+		return fmt.Errorf("user %s not found", user.ID)
+	}
+	s.users[user.ID] = user
 	return nil
 }

@@ -63,6 +63,7 @@ func migrate(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS runs (
 			id         TEXT PRIMARY KEY,
+			user_id    TEXT DEFAULT '',
 			mode       TEXT NOT NULL DEFAULT 'run',
 			name       TEXT NOT NULL DEFAULT '',
 			status     TEXT NOT NULL DEFAULT 'pending',
@@ -75,22 +76,44 @@ func migrate(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 		CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_runs_user_id ON runs(user_id);
+
+		CREATE TABLE IF NOT EXISTS users (
+			id         TEXT PRIMARY KEY,
+			email      TEXT UNIQUE NOT NULL,
+			name       TEXT NOT NULL DEFAULT '',
+			avatar     TEXT DEFAULT '',
+			password   TEXT NOT NULL,
+			plan       TEXT NOT NULL DEFAULT 'free',
+			api_key    TEXT DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
+		CREATE INDEX IF NOT EXISTS idx_users_api_key ON users(api_key);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Add user_id column to existing runs table (ignore error if already exists).
+	db.Exec("ALTER TABLE runs ADD COLUMN user_id TEXT DEFAULT ''")
+
+	return nil
 }
 
 func (s *sqliteStore) CreateRun(ctx context.Context, run *model.Run) error {
 	cfgJSON, _ := json.Marshal(run.Config)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO runs (id, name, mode, status, agent_file, config, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, run.Name, string(run.Mode), run.Status, run.AgentFile, string(cfgJSON), run.CreatedAt,
+		`INSERT INTO runs (id, user_id, name, mode, status, agent_file, config, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.UserID, run.Name, string(run.Mode), run.Status, run.AgentFile, string(cfgJSON), run.CreatedAt,
 	)
 	return err
 }
 
 func (s *sqliteStore) GetRun(ctx context.Context, id string) (*model.Run, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, mode, name, status, agent_file, config, result, created_at, started_at, ended_at FROM runs WHERE id = ?`, id,
+		`SELECT id, user_id, mode, name, status, agent_file, config, result, created_at, started_at, ended_at FROM runs WHERE id = ?`, id,
 	)
 	return scanRun(row)
 }
@@ -111,7 +134,7 @@ func (s *sqliteStore) UpdateRun(ctx context.Context, run *model.Run) error {
 
 func (s *sqliteStore) ListRuns(ctx context.Context, limit, offset int) ([]*model.Run, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, mode, name, status, agent_file, config, result, created_at, started_at, ended_at
+		`SELECT id, user_id, mode, name, status, agent_file, config, result, created_at, started_at, ended_at
 		 FROM runs ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset,
 	)
 	if err != nil {
@@ -155,7 +178,7 @@ func scanRun(row scannable) (*model.Run, error) {
 	)
 
 	err := row.Scan(
-		&run.ID, &run.Mode, &run.Name, &run.Status, &run.AgentFile,
+		&run.ID, &run.UserID, &run.Mode, &run.Name, &run.Status, &run.AgentFile,
 		&cfgJSON, &resultJSON, &run.CreatedAt, &startedAt, &endedAt,
 	)
 	if err != nil {
@@ -193,7 +216,7 @@ func scanRunRows(rows *sql.Rows) (*model.Run, error) {
 	)
 
 	err := rows.Scan(
-		&run.ID, &run.Mode, &run.Name, &run.Status, &run.AgentFile,
+		&run.ID, &run.UserID, &run.Mode, &run.Name, &run.Status, &run.AgentFile,
 		&cfgJSON, &resultJSON, &run.CreatedAt, &startedAt, &endedAt,
 	)
 	if err != nil {
@@ -221,6 +244,62 @@ func scanRunRows(rows *sql.Rows) (*model.Run, error) {
 // Healthy implements x.HealthChecker
 func (s *sqliteStore) Healthy(_ context.Context) error {
 	return s.db.Ping()
+}
+
+// --- User methods ---
+
+func (s *sqliteStore) CreateUser(ctx context.Context, user *model.User) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO users (id, email, name, avatar, password, plan, api_key, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		user.ID, user.Email, user.Name, user.Avatar, user.Password,
+		user.Plan, user.APIKey, user.CreatedAt, user.UpdatedAt,
+	)
+	return err
+}
+
+func (s *sqliteStore) GetUser(ctx context.Context, id string) (*model.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, email, name, avatar, password, plan, api_key, created_at, updated_at FROM users WHERE id = ?`, id,
+	)
+	return scanUser(row)
+}
+
+func (s *sqliteStore) GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, email, name, avatar, password, plan, api_key, created_at, updated_at FROM users WHERE email = ?`, email,
+	)
+	return scanUser(row)
+}
+
+func (s *sqliteStore) GetUserByAPIKey(ctx context.Context, apiKeyHash string) (*model.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, email, name, avatar, password, plan, api_key, created_at, updated_at FROM users WHERE api_key = ?`, apiKeyHash,
+	)
+	return scanUser(row)
+}
+
+func (s *sqliteStore) UpdateUser(ctx context.Context, user *model.User) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE users SET email = ?, name = ?, avatar = ?, password = ?, plan = ?, api_key = ?, updated_at = ? WHERE id = ?`,
+		user.Email, user.Name, user.Avatar, user.Password, user.Plan, user.APIKey, user.UpdatedAt, user.ID,
+	)
+	return err
+}
+
+func scanUser(row scannable) (*model.User, error) {
+	var user model.User
+	err := row.Scan(
+		&user.ID, &user.Email, &user.Name, &user.Avatar, &user.Password,
+		&user.Plan, &user.APIKey, &user.CreatedAt, &user.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
 }
 
 // unused but ensures compile-time check
