@@ -63,6 +63,7 @@ func migrate(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS runs (
 			id         TEXT PRIMARY KEY,
+			mode       TEXT NOT NULL DEFAULT 'run',
 			name       TEXT NOT NULL DEFAULT '',
 			status     TEXT NOT NULL DEFAULT 'pending',
 			agent_file TEXT NOT NULL DEFAULT '',
@@ -81,15 +82,15 @@ func migrate(db *sql.DB) error {
 func (s *sqliteStore) CreateRun(ctx context.Context, run *model.Run) error {
 	cfgJSON, _ := json.Marshal(run.Config)
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO runs (id, name, status, agent_file, config, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		run.ID, run.Name, run.Status, run.AgentFile, string(cfgJSON), run.CreatedAt,
+		`INSERT INTO runs (id, name, mode, status, agent_file, config, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.Name, string(run.Mode), run.Status, run.AgentFile, string(cfgJSON), run.CreatedAt,
 	)
 	return err
 }
 
 func (s *sqliteStore) GetRun(ctx context.Context, id string) (*model.Run, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, status, agent_file, config, result, created_at, started_at, ended_at FROM runs WHERE id = ?`, id,
+		`SELECT id, mode, name, status, agent_file, config, result, created_at, started_at, ended_at FROM runs WHERE id = ?`, id,
 	)
 	return scanRun(row)
 }
@@ -102,15 +103,15 @@ func (s *sqliteStore) UpdateRun(ctx context.Context, run *model.Run) error {
 		resultJSON = &s
 	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE runs SET status = ?, result = ?, started_at = ?, ended_at = ? WHERE id = ?`,
-		run.Status, resultJSON, run.StartedAt, run.EndedAt, run.ID,
+		`UPDATE runs SET mode = ?, status = ?, result = ?, started_at = ?, ended_at = ? WHERE id = ?`,
+		string(run.Mode), run.Status, resultJSON, run.StartedAt, run.EndedAt, run.ID,
 	)
 	return err
 }
 
 func (s *sqliteStore) ListRuns(ctx context.Context, limit, offset int) ([]*model.Run, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, status, agent_file, config, result, created_at, started_at, ended_at
+		`SELECT id, mode, name, status, agent_file, config, result, created_at, started_at, ended_at
 		 FROM runs ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset,
 	)
 	if err != nil {
@@ -154,7 +155,7 @@ func scanRun(row scannable) (*model.Run, error) {
 	)
 
 	err := row.Scan(
-		&run.ID, &run.Name, &run.Status, &run.AgentFile,
+		&run.ID, &run.Mode, &run.Name, &run.Status, &run.AgentFile,
 		&cfgJSON, &resultJSON, &run.CreatedAt, &startedAt, &endedAt,
 	)
 	if err != nil {
@@ -192,7 +193,7 @@ func scanRunRows(rows *sql.Rows) (*model.Run, error) {
 	)
 
 	err := rows.Scan(
-		&run.ID, &run.Name, &run.Status, &run.AgentFile,
+		&run.ID, &run.Mode, &run.Name, &run.Status, &run.AgentFile,
 		&cfgJSON, &resultJSON, &run.CreatedAt, &startedAt, &endedAt,
 	)
 	if err != nil {

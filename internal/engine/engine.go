@@ -122,3 +122,76 @@ func (e *Engine) Get(ctx context.Context, id string) (*model.Run, error) {
 func (e *Engine) List(ctx context.Context, limit, offset int) ([]*model.Run, error) {
 	return e.store.ListRuns(ctx, limit, offset)
 }
+
+// StartSession creates and starts a persistent session container.
+func (e *Engine) StartSession(ctx context.Context, run *model.Run) error {
+	run.Mode = model.RunModeSession
+	run.Status = model.RunStatusPending
+	run.CreatedAt = time.Now()
+
+	if err := e.store.CreateRun(ctx, run); err != nil {
+		return fmt.Errorf("create run: %w", err)
+	}
+
+	req := &executor.Request{
+		ID:        run.ID,
+		AgentFile: run.AgentFile,
+		Image:     run.Config.Image,
+		Env:       run.Config.Env,
+	}
+
+	_, err := e.executor.StartSession(ctx, req)
+	if err != nil {
+		run.Status = model.RunStatusFailed
+		run.Result = &model.Result{ExitCode: 1, Error: err.Error()}
+		_ = e.store.UpdateRun(ctx, run)
+		return fmt.Errorf("start session: %w", err)
+	}
+
+	now := time.Now()
+	run.Status = model.RunStatusRunning
+	run.StartedAt = &now
+	_ = e.store.UpdateRun(ctx, run)
+
+	e.logger.Info("session started", "id", run.ID)
+	return nil
+}
+
+// SendMessage sends a message to a running session and returns the response.
+func (e *Engine) SendMessage(ctx context.Context, runID string, message string) (string, error) {
+	run, err := e.store.GetRun(ctx, runID)
+	if err != nil {
+		return "", fmt.Errorf("get run: %w", err)
+	}
+	if run.Mode != model.RunModeSession {
+		return "", fmt.Errorf("run %s is not a session", runID)
+	}
+	if run.Status != model.RunStatusRunning {
+		return "", fmt.Errorf("session %s is not running (status: %s)", runID, run.Status)
+	}
+
+	return e.executor.SendMessage(ctx, runID, message)
+}
+
+// StopSession stops a running session container.
+func (e *Engine) StopSession(ctx context.Context, runID string) error {
+	run, err := e.store.GetRun(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("get run: %w", err)
+	}
+	if run.Mode != model.RunModeSession {
+		return fmt.Errorf("run %s is not a session", runID)
+	}
+
+	if err := e.executor.StopSession(ctx, runID); err != nil {
+		e.logger.Error("stop session failed", "id", runID, "err", err)
+	}
+
+	now := time.Now()
+	run.Status = model.RunStatusCompleted
+	run.EndedAt = &now
+	_ = e.store.UpdateRun(ctx, run)
+
+	e.logger.Info("session stopped", "id", runID)
+	return nil
+}

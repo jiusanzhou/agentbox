@@ -146,6 +146,64 @@ func (s *Service) DeleteRun(ctx context.Context, id string) error {
 	return s.engine.Cancel(id)
 }
 
+// --- session endpoints ---
+
+type CreateSessionRequest struct {
+	Name      string          `json:"name"`
+	AgentFile string          `json:"agent_file"`
+	Config    model.RunConfig `json:"config"`
+}
+
+// CreateSession handles POST /session
+func (s *Service) CreateSession(ctx context.Context, req *CreateSessionRequest) (*model.Run, error) {
+	if req.AgentFile == "" {
+		return nil, talk.NewError(talk.InvalidArgument, "agent_file is required")
+	}
+
+	run := &model.Run{
+		ID:        shortID(),
+		Name:      req.Name,
+		Mode:      model.RunModeSession,
+		AgentFile: req.AgentFile,
+		Config:    req.Config,
+	}
+
+	if err := s.engine.StartSession(ctx, run); err != nil {
+		return nil, talk.NewError(talk.Internal, err.Error())
+	}
+	return run, nil
+}
+
+type CreateSessionMessageRequest struct {
+	SessionID string `json:"session_id"`
+	Message   string `json:"message"`
+}
+
+type CreateSessionMessageResponse struct {
+	Response string `json:"response"`
+}
+
+// CreateSessionMessage handles POST /session_message
+func (s *Service) CreateSessionMessage(ctx context.Context, req *CreateSessionMessageRequest) (*CreateSessionMessageResponse, error) {
+	if req.SessionID == "" {
+		return nil, talk.NewError(talk.InvalidArgument, "session_id is required")
+	}
+	if req.Message == "" {
+		return nil, talk.NewError(talk.InvalidArgument, "message is required")
+	}
+
+	resp, err := s.engine.SendMessage(ctx, req.SessionID, req.Message)
+	if err != nil {
+		return nil, talk.NewError(talk.Internal, err.Error())
+	}
+	return &CreateSessionMessageResponse{Response: resp}, nil
+}
+
+// DeleteSession handles DELETE /session/{id}
+func (s *Service) DeleteSession(ctx context.Context, id string) error {
+	return s.engine.StopSession(ctx, id)
+}
+
 // @talk path=/healthz method=GET
 func (s *Service) GetHealth(ctx context.Context) (map[string]string, error) {
 	return map[string]string{"status": "ok"}, nil

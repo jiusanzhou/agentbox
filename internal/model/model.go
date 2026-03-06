@@ -2,6 +2,15 @@ package model
 
 import "time"
 
+// RunMode represents the execution mode.
+type RunMode string
+
+const (
+	RunModeRun     RunMode = "run"     // one-shot execution (default)
+	RunModeSession RunMode = "session" // interactive persistent container
+	RunModeDaemon  RunMode = "daemon"  // TODO: cron-based scheduled execution
+)
+
 // RunStatus represents the lifecycle state of an agent run.
 type RunStatus string
 
@@ -17,6 +26,7 @@ const (
 type Run struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
+	Mode      RunMode    `json:"mode"`
 	Status    RunStatus  `json:"status"`
 	AgentFile string     `json:"agent_file"`
 	Config    RunConfig  `json:"config"`
@@ -24,6 +34,13 @@ type Run struct {
 	CreatedAt time.Time  `json:"created_at"`
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
+}
+
+// Message represents a chat message in a session.
+type Message struct {
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // RunConfig holds execution configuration.

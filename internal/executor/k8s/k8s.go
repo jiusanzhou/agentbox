@@ -170,3 +170,15 @@ func (e *k8sExecutor) Stop(ctx context.Context, id string) error {
 		PropagationPolicy: &propagation,
 	})
 }
+
+func (e *k8sExecutor) StartSession(ctx context.Context, req *executor.Request) (string, error) {
+	return "", fmt.Errorf("session mode not supported by k8s executor")
+}
+
+func (e *k8sExecutor) SendMessage(ctx context.Context, id string, message string) (string, error) {
+	return "", fmt.Errorf("session mode not supported by k8s executor")
+}
+
+func (e *k8sExecutor) StopSession(ctx context.Context, id string) error {
+	return fmt.Errorf("session mode not supported by k8s executor")
+}

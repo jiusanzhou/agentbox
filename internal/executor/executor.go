@@ -47,6 +47,11 @@ type Executor interface {
 	Execute(ctx context.Context, req *Request) (*Response, error)
 	Logs(ctx context.Context, id string) (string, error)
 	Stop(ctx context.Context, id string) error
+
+	// Session methods for interactive persistent containers.
+	StartSession(ctx context.Context, req *Request) (string, error)
+	SendMessage(ctx context.Context, id string, message string) (string, error)
+	StopSession(ctx context.Context, id string) error
 }
 
 // New creates a new Executor from a TypedLazyConfig.

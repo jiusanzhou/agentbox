@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"context"
 	"fmt"
 	"log/slog"
@@ -81,6 +82,17 @@ func (e *dockerExecutor) Execute(ctx context.Context, req *executor.Request) (*e
 	// Volumes
 	for _, vol := range req.Volumes {
 		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", vol.Source, vol.MountPath))
+	}
+
+	// Auto-mount Claude config if exists
+	homeDir, _ := os.UserHomeDir()
+	claudeDir := filepath.Join(homeDir, ".claude")
+	if _, err := os.Stat(claudeDir); err == nil {
+		args = append(args, "-v", fmt.Sprintf("%s:/home/agent/.claude", claudeDir))
+	}
+	claudeJSON := filepath.Join(homeDir, ".claude.json")
+	if _, err := os.Stat(claudeJSON); err == nil {
+		args = append(args, "-v", fmt.Sprintf("%s:/home/agent/.claude.json:ro", claudeJSON))
 	}
 
 	args = append(args, image)
@@ -190,4 +202,136 @@ func (e *dockerExecutor) Stop(ctx context.Context, id string) error {
 	}
 
 	return cmd.Run()
+}
+
+// StartSession starts a detached container for interactive session mode.
+func (e *dockerExecutor) StartSession(ctx context.Context, req *executor.Request) (string, error) {
+	image := req.Image
+	if image == "" {
+		image = e.cfg.Image
+	}
+
+	containerName := fmt.Sprintf("agentbox-%s", req.ID)
+
+	args := []string{
+		"run", "-d",
+		"--name", containerName,
+	}
+
+	// Environment variables
+	args = append(args, "-e", fmt.Sprintf("AGENTBOX_RUN_ID=%s", req.ID))
+	args = append(args, "-e", fmt.Sprintf("AGENTBOX_AGENT_FILE=%s", req.AgentFile))
+	args = append(args, "-e", "AGENTBOX_MODE=session")
+	for k, v := range req.Env {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Volumes
+	for _, vol := range req.Volumes {
+		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", vol.Source, vol.MountPath))
+	}
+
+	// Auto-mount Claude config if exists
+	homeDir, _ := os.UserHomeDir()
+	claudeDir := filepath.Join(homeDir, ".claude")
+	if _, err := os.Stat(claudeDir); err == nil {
+		args = append(args, "-v", fmt.Sprintf("%s:/home/agent/.claude", claudeDir))
+	}
+	claudeJSON := filepath.Join(homeDir, ".claude.json")
+	if _, err := os.Stat(claudeJSON); err == nil {
+		args = append(args, "-v", fmt.Sprintf("%s:/home/agent/.claude.json:ro", claudeJSON))
+	}
+
+	args = append(args, image)
+
+	e.logger.Info("starting session container", "name", containerName, "image", image)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	if e.cfg.Host != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker run: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	containerID := strings.TrimSpace(string(out))
+
+	e.mu.Lock()
+	e.containers[req.ID] = containerName
+	e.mu.Unlock()
+
+	e.logger.Info("session container started", "name", containerName, "container_id", containerID[:12])
+	return containerID, nil
+}
+
+// SendMessage executes claude -p in a running session container.
+func (e *dockerExecutor) SendMessage(ctx context.Context, id string, message string) (string, error) {
+	e.mu.Lock()
+	containerName, ok := e.containers[id]
+	e.mu.Unlock()
+
+	if !ok {
+		containerName = fmt.Sprintf("agentbox-%s", id)
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "exec",
+		"-u", "agent",
+		"-w", "/workspace",
+		containerName,
+		"claude", "-p", "--dangerously-skip-permissions", message,
+	)
+	if e.cfg.Host != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	e.logger.Info("sending message to session", "container", containerName)
+
+	if err := cmd.Run(); err != nil {
+		output := stdout.String()
+		if stderr.Len() > 0 {
+			output += "\n" + stderr.String()
+		}
+		return output, fmt.Errorf("docker exec: %w", err)
+	}
+
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// StopSession stops and removes a session container.
+func (e *dockerExecutor) StopSession(ctx context.Context, id string) error {
+	e.mu.Lock()
+	containerName, ok := e.containers[id]
+	e.mu.Unlock()
+
+	if !ok {
+		containerName = fmt.Sprintf("agentbox-%s", id)
+	}
+
+	e.logger.Info("stopping session container", "name", containerName)
+
+	// Stop the container
+	stopCmd := exec.CommandContext(ctx, "docker", "stop", "-t", "10", containerName)
+	if e.cfg.Host != "" {
+		stopCmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
+	}
+	_ = stopCmd.Run()
+
+	// Remove the container
+	rmCmd := exec.CommandContext(ctx, "docker", "rm", "-f", containerName)
+	if e.cfg.Host != "" {
+		rmCmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
+	}
+	err := rmCmd.Run()
+
+	e.mu.Lock()
+	delete(e.containers, id)
+	e.mu.Unlock()
+
+	return err
 }
