@@ -41,8 +41,9 @@ type dockerExecutor struct {
 	cfg    Config
 	logger *slog.Logger
 
-	mu         sync.Mutex
-	containers map[string]string // runID -> containerID
+	mu            sync.Mutex
+	containers    map[string]string // runID -> containerID
+	sessionMsgCnt map[string]int    // runID -> message count
 }
 
 func New(cfg Config) (executor.Executor, error) {
@@ -51,9 +52,10 @@ func New(cfg Config) (executor.Executor, error) {
 		return nil, fmt.Errorf("docker not found in PATH: %w", err)
 	}
 	return &dockerExecutor{
-		cfg:        cfg,
-		logger:     slog.Default(),
-		containers: make(map[string]string),
+		cfg:           cfg,
+		logger:        slog.Default(),
+		containers:    make(map[string]string),
+		sessionMsgCnt: make(map[string]int),
 	}, nil
 }
 
@@ -270,18 +272,28 @@ func (e *dockerExecutor) StartSession(ctx context.Context, req *executor.Request
 func (e *dockerExecutor) SendMessage(ctx context.Context, id string, message string) (string, error) {
 	e.mu.Lock()
 	containerName, ok := e.containers[id]
+	msgCnt := e.sessionMsgCnt[id]
+	e.sessionMsgCnt[id] = msgCnt + 1
 	e.mu.Unlock()
 
 	if !ok {
 		containerName = fmt.Sprintf("agentbox-%s", id)
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "exec",
+	// Build claude args: first message is plain, subsequent use --continue
+	claudeArgs := []string{"exec",
 		"-u", "agent",
 		"-w", "/workspace",
+		"-e", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
 		containerName,
-		"claude", "-p", "--dangerously-skip-permissions", message,
-	)
+		"claude", "-p", "--dangerously-skip-permissions",
+	}
+	if msgCnt > 0 {
+		claudeArgs = append(claudeArgs, "--continue")
+	}
+	claudeArgs = append(claudeArgs, message)
+
+	cmd := exec.CommandContext(ctx, "docker", claudeArgs...)
 	if e.cfg.Host != "" {
 		cmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
 	}
@@ -331,6 +343,7 @@ func (e *dockerExecutor) StopSession(ctx context.Context, id string) error {
 
 	e.mu.Lock()
 	delete(e.containers, id)
+	delete(e.sessionMsgCnt, id)
 	e.mu.Unlock()
 
 	return err
