@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/chzyer/readline"
 	"go.zoe.im/x/cli"
 )
 
@@ -27,11 +27,9 @@ var chatCmd = cli.New(
 			}
 		}
 
-		addr := serverAddr
-		if a := os.Getenv("AGENTBOX_SERVER"); a != "" {
-			addr = a
-		}
+		addr := getAddr()
 
+		// Create session
 		body, _ := json.Marshal(map[string]any{
 			"name":       "chat-session",
 			"agent_file": agentFile,
@@ -62,10 +60,25 @@ var chatCmd = cli.New(
 		}
 
 		fmt.Println()
-		fmt.Println("  \033[1mABox Session\033[0m  \033[33m" + sid + "\033[0m  \033[32m" + session.Status + "\033[0m")
-		fmt.Println("  \033[2mType your message. /quit to exit.\033[0m")
+		fmt.Printf("  \033[1mABox Session\033[0m  \033[33m%s\033[0m  \033[32m%s\033[0m\n", sid, session.Status)
+		fmt.Println("  \033[2mCtrl+C or /quit to exit. Arrow keys for history.\033[0m")
 		fmt.Println()
 
+		// Setup readline
+		rl, err := readline.NewEx(&readline.Config{
+			Prompt:            "\033[1;32m> \033[0m",
+			HistoryFile:       os.ExpandEnv("$HOME/.abox_chat_history"),
+			HistorySearchFold: true,
+			InterruptPrompt:   "^C",
+			EOFPrompt:         "/quit",
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		defer rl.Close()
+
+		// Handle Ctrl+C: stop session
 		ctx, cancel := context.WithCancel(context.Background())
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -75,29 +88,36 @@ var chatCmd = cli.New(
 			req, _ := http.NewRequest("DELETE", addr+"/api/v1/session/"+session.ID, nil)
 			http.DefaultClient.Do(req)
 			cancel()
+			rl.Close()
+			fmt.Println("\033[32m  Session ended.\033[0m")
 			os.Exit(0)
 		}()
 
-		scanner := bufio.NewScanner(os.Stdin)
 		for {
-			fmt.Print("\033[1;32m> \033[0m")
-			if !scanner.Scan() {
+			line, err := rl.Readline()
+			if err != nil {
+				// EOF or interrupt
 				break
 			}
-			msg := strings.TrimSpace(scanner.Text())
+			msg := strings.TrimSpace(line)
 			if msg == "" {
 				continue
 			}
 			if msg == "/quit" || msg == "/exit" || msg == "/q" {
 				break
 			}
+			if msg == "/clear" {
+				readline.ClearScreen(rl)
+				continue
+			}
 
+			// Send message
 			msgBody, _ := json.Marshal(map[string]string{
 				"session_id": session.ID,
 				"message":    msg,
 			})
 
-			fmt.Print("\033[2m  thinking...\033[0m\r")
+			fmt.Print("\033[2m  thinking...\033[0m")
 
 			req, _ := http.NewRequestWithContext(ctx, "POST",
 				addr+"/api/v1/sessionmessage", strings.NewReader(string(msgBody)))
@@ -105,7 +125,7 @@ var chatCmd = cli.New(
 
 			msgResp, err := http.DefaultClient.Do(req)
 			if err != nil {
-				fmt.Printf("\033[31m  Error: %v\033[0m\n", err)
+				fmt.Printf("\r\033[K\033[31m  Error: %v\033[0m\n", err)
 				continue
 			}
 
@@ -117,6 +137,7 @@ var chatCmd = cli.New(
 			json.NewDecoder(msgResp.Body).Decode(&result)
 			msgResp.Body.Close()
 
+			// Clear "thinking..."
 			fmt.Print("\r\033[K")
 
 			if result.Code != 0 {
@@ -126,6 +147,7 @@ var chatCmd = cli.New(
 			}
 		}
 
+		// Cleanup
 		fmt.Println("\n\033[2m  Stopping session...\033[0m")
 		req, _ := http.NewRequest("DELETE", addr+"/api/v1/session/"+session.ID, nil)
 		http.DefaultClient.Do(req)
