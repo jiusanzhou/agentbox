@@ -6,218 +6,224 @@
   <br />
   <strong>AI Agent 的 Serverless 平台</strong>
   <br />
-  <sub>用 Markdown 定义工作流，在沙箱中执行，自动收集产出物。</sub>
+  <sub>用 Markdown 定义工作流，在沙箱中执行，访问本地文件，流式输出结果。</sub>
   <br />
   <br />
   <a href="./README.md">English</a> · 中文
   <br />
   <br />
-  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go" alt="Go Version" /></a>
+  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go" alt="Go" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build Status" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build" /></a>
+  <a href="https://github.com/jiusanzhou/abox-skills"><img src="https://img.shields.io/badge/skills-20+-orange.svg" alt="Skills" /></a>
 </p>
 
 ---
 
-**ABox** 接收一个自然语言编写的 Agent 定义文件（`AGENTS.md`），在隔离容器中执行 — Docker 或 Kubernetes。无需 SDK，无需样板代码，Markdown 进，结果出。
+**ABox** 在隔离容器中运行 AI Agent。给它一个 Markdown 文件，拿回结果。支持一次性运行、带上下文记忆的交互式会话、以及本地文件访问 — 一个 CLI 搞定全部。
 
-## 特性
+## ✨ 亮点
 
-- 🧊 **沙箱执行** — 每次运行启动全新容器（Docker 或 K8s Job）
-- 📝 **Markdown 原生** — 用 `AGENTS.md` 定义 Agent，不需要任何 SDK
-- 🔌 **可插拔后端** — 执行器、存储、制品存储全部可通过配置切换
-- 🖥️ **Web 管理台** — Next.js 仪表盘，创建、监控、查看运行详情
-- ⚡ **异步设计** — 提交即返回，后台协程执行
-- 🗄️ **持久化历史** — 默认 SQLite，可选 PostgreSQL 或内存
-- 📦 **制品存储** — 本地文件系统或 S3 兼容对象存储
-- 🔒 **超时与取消** — 基于 Context 的超时控制，支持运行中取消
-- 🛠️ **CLI + REST API** — 命令行和 HTTP 双通道
+| | |
+|---|---|
+| 🧊 **沙箱隔离** | 每次运行启动全新 Docker/K8s 容器 |
+| 💬 **交互会话** | 持久化容器，多轮对话上下文保持 |
+| 🌊 **流式输出** | 逐 token 实时打印 |
+| 📁 **本地文件** | 通过 WebDAV 桥接访问宿主机文件 |
+| 🔌 **可插拔** | 执行器、存储、制品存储全部可配置切换 |
+| 📝 **Markdown 原生** | `AGENTS.md` 进，结果出，无需 SDK |
 
 ## 快速开始
-
-### 1. 安装
 
 ```bash
 git clone https://github.com/jiusanzhou/agentbox.git && cd agentbox
 make
-```
 
-构建产物：`bin/agentbox`（服务端）和 `bin/agentboxctl`（CLI 客户端）。
-
-### 2. 配置
-
-```bash
-cp config.yaml config.local.yaml
-# 默认配置开箱即用，按需修改
-```
-
-### 3. 运行
-
-```bash
 # 启动服务
-./bin/agentbox --config config.yaml
+./bin/abox --config config.yaml
 
-# 提交一个 Agent 工作流
-./bin/agentboxctl run examples/hn-curator/AGENTS.md
+# 运行你的第一个 Agent
+./bin/aboxctl run examples/vm0-hn-curator/AGENTS.md
+```
 
-# 查看状态
-./bin/agentboxctl list
-./bin/agentboxctl get <run-id>
+## 使用示例
+
+### 一次性运行
+
+提交 Agent，完成后获取结果：
+
+```bash
+aboxctl run examples/vm0-hn-curator/AGENTS.md
+aboxctl list
+aboxctl get <run-id>
+```
+
+### 交互式聊天
+
+启动持久化会话，流式输出，方向键翻历史，多轮上下文：
+
+```bash
+# 默认助手
+aboxctl chat
+
+# 自定义人设
+aboxctl chat "你是一个 Go 专家，用中文回答"
+
+# 用 AGENTS.md 文件
+aboxctl chat examples/vm0-deep-research/AGENTS.md
+```
+
+```
+  ABox Session  f8870923  running
+  Ctrl+C or /quit to exit. Arrow keys for history.
+
+> 我叫 Zoe，最喜欢的语言是 Go
+< 你好 Zoe！Go 是很棒的语言，有什么可以帮你的？
+
+> 我叫什么？
+< 你叫 Zoe。                                ← 上下文保持
+```
+
+### 本地文件访问
+
+让 Agent 读写宿主机文件：
+
+```bash
+# 终端 1: 启动桥接
+aboxctl bridge --roots ~/Documents,~/projects
+
+# 终端 2: 聊天，自动获得文件访问能力
+aboxctl chat "你可以访问本地文件，先读 LOCAL_FILES.md"
+```
+
+Agent 自动获得 helper 命令：
+
+```bash
+local-ls /r0/              # 列目录
+local-cat /r0/src/main.go  # 读文件
+local-get /r0/data.csv     # 下载到工作区
+local-put ./out.md /r0/    # 上传到宿主机
+local-find /r0/ ".go"      # 搜索文件
+```
+
+### 会话管理
+
+编程式控制：
+
+```bash
+aboxctl ss create "你是一个数据分析师"
+aboxctl ss send <id> "分析这份 CSV 数据..."
+aboxctl ss send <id> "现在画个图表"
+aboxctl ss ls
+aboxctl ss stop <id>
+```
+
+### REST API
+
+所有操作均可通过 HTTP 调用：
+
+```bash
+# 一次性运行
+curl -X POST localhost:8080/api/v1/run \
+  -H "Content-Type: application/json" \
+  -d '{"name":"my-agent","agent_file":"# Agent\n## Workflow\n- echo hello"}'
+
+# 创建会话
+curl -X POST localhost:8080/api/v1/session \
+  -d '{"name":"bot","agent_file":"你是一个助手"}'
+
+# 发送消息
+curl -X POST localhost:8080/api/v1/sessionmessage \
+  -d '{"session_id":"<id>","message":"你好"}'
 ```
 
 ## 架构
 
 ```
-                    ┌──────────────────────────┐
-                    │     Web UI (Next.js)      │
-                    └────────────┬─────────────┘
-                                 │
-        ┌────────────┐           │  HTTP / JSON
-        │ agentboxctl│───────────┤
-        └────────────┘           │
-                                 ▼
-                    ┌──────────────────────────┐
-                    │   Talk Server (REST API)  │
-                    │   go.zoe.im/x/talk        │
-                    └────────────┬─────────────┘
-                                 │
-                                 ▼
-                    ┌──────────────────────────┐
-                    │         Engine            │
-                    │    (调度 + 生命周期管理)    │
-                    └──┬─────────┬──────────┬──┘
-                       │         │          │
-              ┌────────▼──┐ ┌───▼────┐ ┌───▼──────┐
-              │  Executor  │ │ Store  │ │ Storage  │
-              │docker | k8s│ │sqlite  │ │local | s3│
-              └────────┬───┘ │postgres│ └──────────┘
-                       │     │memory  │
-                       ▼     └────────┘
-              ┌────────────────┐
-              │   Sandbox      │
-              │   Container    │
-              │  (AGENTS.md    │
-              │   → AI Agent)  │
-              └────────────────┘
+ aboxctl ──────────────┐
+                        │  HTTP
+ Web Dashboard ─────────┤
+                        ▼
+              ┌──────────────────┐
+              │  Talk REST API   │
+              └────────┬─────────┘
+                       │
+              ┌────────▼─────────┐
+              │     Engine       │
+              │  run · session   │
+              └──┬──────┬─────┬──┘
+                 │      │     │
+           ┌─────▼┐  ┌──▼──┐ ┌▼───────┐
+           │Docker│  │SQLite│ │Local FS│
+           │  K8s │  │ PG  │ │   S3   │
+           └──┬───┘  └─────┘ └────────┘
+              │
+     ┌────────▼────────┐       ┌──────────────┐
+     │  Sandbox         │      │ aboxctl      │
+     │  Container       │◄─────│ bridge       │
+     │                  │ WebDAV│ (MCP+WebDAV) │
+     │  Claude Code /   │      └──────────────┘
+     │  Any LLM Agent   │           ▲
+     └──────────────────┘           │
+                              宿主机文件
+                           ~/Documents
+                           ~/projects
 ```
 
-## Agent 定义格式
+## CLI 参考
 
-Agent 用简单的 Markdown 文件（`AGENTS.md`）定义：
-
-```markdown
-# HN 策展
-
-## Instructions
-你是一个 Hacker News 策展人。浏览首页，
-挑选最有趣的 5 个故事，撰写精简摘要。
-
-## Workflow
-- 抓取 https://news.ycombinator.com
-- 按技术价值分析和排序
-- 输出到 `output/digest.md`
-
-## Guidelines
-- 聚焦技术和科学内容
-- 每篇摘要不超过 3 句话
 ```
-
-## 配置
-
-```yaml
-# 存储后端：memory | sqlite | postgres
-store:
-  type: sqlite
-  config:
-    path: ./data/agentbox.db
-
-# 制品存储：local | s3
-storage:
-  type: local
-  config:
-    root: ./data/artifacts
-
-# 执行器：docker | kubernetes
-executor:
-  type: docker
-  config:
-    image: agentbox-sandbox:latest
-
-# 服务端传输
-server:
-  type: http
-  config:
-    addr: ":8080"
+abox                              服务端
+aboxctl run <AGENTS.md>           一次性运行
+aboxctl list                      列出所有运行
+aboxctl get <id>                  运行详情
+aboxctl cancel <id>               取消运行
+aboxctl chat [prompt|file]        交互式会话（流式输出）
+aboxctl ss create [prompt|file]   创建会话
+aboxctl ss send <id> <msg>        发送消息
+aboxctl ss ls                     列出会话
+aboxctl ss stop <id>              停止会话
+aboxctl bridge -r <dirs>          启动数据桥接
 ```
 
 ## API 参考
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/v1/run` | 提交新的 Agent 运行 |
-| `GET` | `/api/v1/run/:id` | 获取运行详情和结果 |
-| `GET` | `/api/v1/runs` | 运行列表（支持分页） |
-| `DELETE` | `/api/v1/run/:id` | 取消运行中的任务 |
+| `POST` | `/api/v1/run` | 提交一次性运行 |
+| `GET` | `/api/v1/runs` | 列出所有运行 |
+| `GET` | `/api/v1/run/:id` | 获取运行详情 |
+| `DELETE` | `/api/v1/run/:id` | 取消运行 |
+| `POST` | `/api/v1/session` | 创建交互式会话 |
+| `POST` | `/api/v1/sessionmessage` | 发送消息到会话 |
+| `DELETE` | `/api/v1/session/:id` | 停止会话 |
 | `GET` | `/api/v1/healthz` | 健康检查 |
 
 ## 可插拔后端
 
-所有后端基于 `go.zoe.im/x` 的工厂模式实现。添加自定义后端只需三步：
-
-**1. 实现接口**
-
-```go
-type MyExecutor struct{}
-
-func (e *MyExecutor) Execute(ctx context.Context, req *Request) (*Response, error) { ... }
-func (e *MyExecutor) Logs(ctx context.Context, id string) (string, error) { ... }
-func (e *MyExecutor) Stop(ctx context.Context, id string) error { ... }
-```
-
-**2. 注册工厂**
+所有后端基于 `go.zoe.im/x` 工厂模式：
 
 ```go
 func init() {
-    executor.Register("my-executor", func(cfg x.TypedLazyConfig, opts ...any) (executor.Executor, error) {
-        var c MyConfig
+    executor.Register("my-backend", func(cfg x.TypedLazyConfig, opts ...any) (executor.Executor, error) {
+        var c Config
         cfg.Unmarshal(&c)
-        return NewMyExecutor(c)
+        return New(c)
     })
 }
-```
-
-**3. 配置使用**
-
-```yaml
-executor:
-  type: my-executor
-  config:
-    endpoint: https://my-service.example.com
 ```
 
 Store 和 Storage 同理。
 
 ## Skill 市场
 
-浏览和分享可复用的 Agent 工作流定义：**[abox-skills](https://github.com/jiusanzhou/abox-skills)**
+浏览 20+ 预置 Agent 技能：**[abox-skills](https://github.com/jiusanzhou/abox-skills)**
 
-## Web 管理台
-
-ABox 内置 Next.js 管理后台：
-
-```bash
-cd web && pnpm install && pnpm dev
-```
+分类：内容与研究 · 开发 · 数据分析 · DevOps · 设计 · 自动化
 
 ## 贡献
 
-欢迎提交 Pull Request！
-
-1. Fork 仓库
-2. 创建特性分支（`git checkout -b feat/amazing-feature`）
-3. 提交改动（`git commit -m 'feat: add amazing feature'`）
-4. 推送分支（`git push origin feat/amazing-feature`）
-5. 发起 Pull Request
+Fork → `git checkout -b feat/amazing` → commit → push → PR
 
 ## 开源协议
 
