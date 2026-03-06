@@ -36,7 +36,7 @@ func init() {
 func runBridge(cmd *cli.Command, args ...string) {
 	if bridgeRoots == "" {
 		fmt.Fprintln(os.Stderr, "Error: --roots is required")
-		fmt.Fprintln(os.Stderr, "Example: agentboxctl bridge --roots ~/Documents,~/projects")
+		fmt.Fprintln(os.Stderr, "Example: aboxctl bridge --roots ~/Documents,~/projects")
 		os.Exit(1)
 	}
 

@@ -15,7 +15,7 @@ import (
 )
 
 var cmd = cli.New(
-	cli.Name("agentbox"),
+	cli.Name("abox"),
 	cli.Short("Agent workflow execution platform"),
 	cli.Description("Run natural language-described agent workflows in isolated sandbox environments."),
 	version.NewOption(true),

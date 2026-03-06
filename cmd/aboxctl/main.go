@@ -31,7 +31,7 @@ func newClient() (*talk.Client, error) {
 }
 
 var cmd = cli.New(
-	cli.Name("agentboxctl"),
+	cli.Name("aboxctl"),
 	cli.Short("AgentBox CLI"),
 	version.NewOption(true),
 )
@@ -41,7 +41,7 @@ var runCmd = cli.New(
 	cli.Short("Submit an agent run"),
 	cli.Run(func(cmd *cli.Command, args ...string) {
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: agentboxctl run <AGENTS.md>")
+			fmt.Fprintln(os.Stderr, "usage: aboxctl run <AGENTS.md>")
 			os.Exit(1)
 		}
 
@@ -103,7 +103,7 @@ var getCmd = cli.New(
 	cli.Short("Get run details"),
 	cli.Run(func(cmd *cli.Command, args ...string) {
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: agentboxctl get <run-id>")
+			fmt.Fprintln(os.Stderr, "usage: aboxctl get <run-id>")
 			os.Exit(1)
 		}
 
@@ -130,7 +130,7 @@ var cancelCmd = cli.New(
 	cli.Short("Cancel a running run"),
 	cli.Run(func(cmd *cli.Command, args ...string) {
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: agentboxctl cancel <run-id>")
+			fmt.Fprintln(os.Stderr, "usage: aboxctl cancel <run-id>")
 			os.Exit(1)
 		}
 

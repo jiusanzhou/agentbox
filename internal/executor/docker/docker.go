@@ -70,7 +70,7 @@ func (e *dockerExecutor) Execute(ctx context.Context, req *executor.Request) (*e
 		image = e.cfg.Image
 	}
 
-	containerName := fmt.Sprintf("agentbox-%s", req.ID)
+	containerName := fmt.Sprintf("abox-%s", req.ID)
 
 	// Build docker run args
 	args := []string{
@@ -179,7 +179,7 @@ func (e *dockerExecutor) Logs(ctx context.Context, id string) (string, error) {
 	e.mu.Unlock()
 
 	if !ok {
-		containerName = fmt.Sprintf("agentbox-%s", id)
+		containerName = fmt.Sprintf("abox-%s", id)
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", "logs", containerName)
@@ -200,7 +200,7 @@ func (e *dockerExecutor) Stop(ctx context.Context, id string) error {
 	e.mu.Unlock()
 
 	if !ok {
-		containerName = fmt.Sprintf("agentbox-%s", id)
+		containerName = fmt.Sprintf("abox-%s", id)
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", "stop", "-t", "10", containerName)
@@ -218,7 +218,7 @@ func (e *dockerExecutor) StartSession(ctx context.Context, req *executor.Request
 		image = e.cfg.Image
 	}
 
-	containerName := fmt.Sprintf("agentbox-%s", req.ID)
+	containerName := fmt.Sprintf("abox-%s", req.ID)
 
 	args := []string{
 		"run", "-d",
@@ -332,7 +332,7 @@ func (e *dockerExecutor) SendMessage(ctx context.Context, id string, message str
 	e.mu.Unlock()
 
 	if !ok {
-		containerName = fmt.Sprintf("agentbox-%s", id)
+		containerName = fmt.Sprintf("abox-%s", id)
 	}
 
 	// Build claude args: first message is plain, subsequent use --continue
@@ -382,7 +382,7 @@ func (e *dockerExecutor) StopSession(ctx context.Context, id string) error {
 	e.mu.Unlock()
 
 	if !ok {
-		containerName = fmt.Sprintf("agentbox-%s", id)
+		containerName = fmt.Sprintf("abox-%s", id)
 	}
 
 	e.logger.Info("stopping session container", "name", containerName)
@@ -418,7 +418,7 @@ func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, messa
 	e.mu.Unlock()
 
 	if !ok {
-		containerName = fmt.Sprintf("agentbox-%s", id)
+		containerName = fmt.Sprintf("abox-%s", id)
 	}
 
 	claudeArgs := []string{"exec",

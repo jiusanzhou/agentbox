@@ -73,7 +73,7 @@ func New(cfg Config) (executor.Executor, error) {
 }
 
 func (e *k8sExecutor) Execute(ctx context.Context, req *executor.Request) (*executor.Response, error) {
-	jobName := fmt.Sprintf("agentbox-%s", req.ID)
+	jobName := fmt.Sprintf("abox-%s", req.ID)
 
 	envVars := []corev1.EnvVar{
 		{Name: "AGENTBOX_RUN_ID", Value: req.ID},
@@ -164,7 +164,7 @@ func (e *k8sExecutor) Logs(ctx context.Context, id string) (string, error) {
 }
 
 func (e *k8sExecutor) Stop(ctx context.Context, id string) error {
-	jobName := fmt.Sprintf("agentbox-%s", id)
+	jobName := fmt.Sprintf("abox-%s", id)
 	propagation := metav1.DeletePropagationForeground
 	return e.client.BatchV1().Jobs(e.namespace).Delete(ctx, jobName, metav1.DeleteOptions{
 		PropagationPolicy: &propagation,

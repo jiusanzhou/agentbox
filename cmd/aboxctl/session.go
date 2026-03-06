@@ -50,7 +50,7 @@ var sessionStopCmd = cli.New(
 	cli.Short("Stop a session"),
 	cli.Run(func(cmd *cli.Command, args ...string) {
 		if len(args) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: agentboxctl session stop <session-id>")
+			fmt.Fprintln(os.Stderr, "usage: aboxctl session stop <session-id>")
 			os.Exit(1)
 		}
 		addr := getAddr()
@@ -70,7 +70,7 @@ var sessionSendCmd = cli.New(
 	cli.Short("Send a message to a session"),
 	cli.Run(func(cmd *cli.Command, args ...string) {
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: agentboxctl session send <session-id> <message>")
+			fmt.Fprintln(os.Stderr, "usage: aboxctl session send <session-id> <message>")
 			os.Exit(1)
 		}
 		addr := getAddr()

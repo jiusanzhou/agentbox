@@ -63,7 +63,7 @@ var chatCmd = cli.New(
 		if len(sid) > 8 {
 			sid = sid[:8]
 		}
-		containerName := "agentbox-" + session.ID
+		containerName := "abox-" + session.ID
 
 		fmt.Println()
 		fmt.Printf("  \033[1mABox Session\033[0m  \033[33m%s\033[0m  \033[32m%s\033[0m\n", sid, session.Status)
