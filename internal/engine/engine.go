@@ -195,3 +195,18 @@ func (e *Engine) StopSession(ctx context.Context, runID string) error {
 	e.logger.Info("session stopped", "id", runID)
 	return nil
 }
+
+// SendMessageStream sends a message and streams tokens via callback.
+func (e *Engine) SendMessageStream(ctx context.Context, runID string, message string, onToken executor.TokenCallback) (string, error) {
+	run, err := e.store.GetRun(ctx, runID)
+	if err != nil {
+		return "", fmt.Errorf("get run: %w", err)
+	}
+	if run.Mode != model.RunModeSession {
+		return "", fmt.Errorf("run %s is not a session", runID)
+	}
+	if run.Status != model.RunStatusRunning {
+		return "", fmt.Errorf("session %s is not running (status: %s)", runID, run.Status)
+	}
+	return e.executor.SendMessageStream(ctx, runID, message, onToken)
+}

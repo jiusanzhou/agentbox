@@ -1,7 +1,9 @@
 package docker
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"context"
@@ -347,4 +349,90 @@ func (e *dockerExecutor) StopSession(ctx context.Context, id string) error {
 	e.mu.Unlock()
 
 	return err
+}
+
+func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, message string, onToken executor.TokenCallback) (string, error) {
+	e.mu.Lock()
+	containerName, ok := e.containers[id]
+	msgCnt := e.sessionMsgCnt[id]
+	e.sessionMsgCnt[id] = msgCnt + 1
+	e.mu.Unlock()
+
+	if !ok {
+		containerName = fmt.Sprintf("agentbox-%s", id)
+	}
+
+	claudeArgs := []string{"exec",
+		"-u", "agent",
+		"-w", "/workspace",
+		"-e", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
+		containerName,
+		"claude", "-p", "--dangerously-skip-permissions",
+		"--output-format", "stream-json", "--verbose",
+	}
+	if msgCnt > 0 {
+		claudeArgs = append(claudeArgs, "--continue")
+	}
+	claudeArgs = append(claudeArgs, message)
+
+	cmd := exec.CommandContext(ctx, "docker", claudeArgs...)
+	if e.cfg.Host != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+
+	e.logger.Info("streaming message to session", "container", containerName)
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("docker exec start: %w", err)
+	}
+
+	var fullResponse strings.Builder
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var event struct {
+			Type  string `json:"type"`
+			Event struct {
+				Type  string `json:"type"`
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+			} `json:"event"`
+			Result string `json:"result"`
+		}
+
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+
+		switch event.Type {
+		case "stream_event":
+			if event.Event.Type == "content_block_delta" && event.Event.Delta.Type == "text_delta" {
+				token := event.Event.Delta.Text
+				fullResponse.WriteString(token)
+				if onToken != nil {
+					onToken(token)
+				}
+			}
+		case "result":
+			if event.Result != "" && fullResponse.Len() == 0 {
+				fullResponse.WriteString(event.Result)
+			}
+		}
+	}
+
+	cmd.Wait()
+	return fullResponse.String(), nil
 }

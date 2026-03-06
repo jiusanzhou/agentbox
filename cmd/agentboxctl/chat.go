@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	osExec "os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/chzyer/readline"
@@ -29,7 +32,7 @@ var chatCmd = cli.New(
 
 		addr := getAddr()
 
-		// Create session
+		// Create session via API
 		body, _ := json.Marshal(map[string]any{
 			"name":       "chat-session",
 			"agent_file": agentFile,
@@ -58,13 +61,13 @@ var chatCmd = cli.New(
 		if len(sid) > 8 {
 			sid = sid[:8]
 		}
+		containerName := "agentbox-" + session.ID
 
 		fmt.Println()
 		fmt.Printf("  \033[1mABox Session\033[0m  \033[33m%s\033[0m  \033[32m%s\033[0m\n", sid, session.Status)
 		fmt.Println("  \033[2mCtrl+C or /quit to exit. Arrow keys for history.\033[0m")
 		fmt.Println()
 
-		// Setup readline
 		rl, err := readline.NewEx(&readline.Config{
 			Prompt:            "\033[1;32m> \033[0m",
 			HistoryFile:       os.ExpandEnv("$HOME/.abox_chat_history"),
@@ -78,25 +81,29 @@ var chatCmd = cli.New(
 		}
 		defer rl.Close()
 
-		// Handle Ctrl+C: stop session
+		stopSession := func() {
+			req, _ := http.NewRequest("DELETE", addr+"/api/v1/session/"+session.ID, nil)
+			http.DefaultClient.Do(req)
+		}
+
 		ctx, cancel := context.WithCancel(context.Background())
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
 			<-sigCh
 			fmt.Println("\n\033[2m  Stopping session...\033[0m")
-			req, _ := http.NewRequest("DELETE", addr+"/api/v1/session/"+session.ID, nil)
-			http.DefaultClient.Do(req)
+			stopSession()
 			cancel()
 			rl.Close()
 			fmt.Println("\033[32m  Session ended.\033[0m")
 			os.Exit(0)
 		}()
 
+		msgCnt := 0
+
 		for {
 			line, err := rl.Readline()
 			if err != nil {
-				// EOF or interrupt
 				break
 			}
 			msg := strings.TrimSpace(line)
@@ -111,46 +118,85 @@ var chatCmd = cli.New(
 				continue
 			}
 
-			// Send message
-			msgBody, _ := json.Marshal(map[string]string{
-				"session_id": session.ID,
-				"message":    msg,
-			})
+			// Stream response via docker exec
+			claudeArgs := []string{"exec",
+				"-u", "agent",
+				"-w", "/workspace",
+				"-e", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
+				containerName,
+				"claude", "-p", "--dangerously-skip-permissions",
+				"--output-format", "stream-json", "--verbose",
+			}
+			if msgCnt > 0 {
+				claudeArgs = append(claudeArgs, "--continue")
+			}
+			claudeArgs = append(claudeArgs, msg)
 
-			fmt.Print("\033[2m  thinking...\033[0m")
-
-			req, _ := http.NewRequestWithContext(ctx, "POST",
-				addr+"/api/v1/sessionmessage", strings.NewReader(string(msgBody)))
-			req.Header.Set("Content-Type", "application/json")
-
-			msgResp, err := http.DefaultClient.Do(req)
+			dockerCmd := osExec.CommandContext(ctx, "docker", claudeArgs...)
+			stdout, err := dockerCmd.StdoutPipe()
 			if err != nil {
-				fmt.Printf("\r\033[K\033[31m  Error: %v\033[0m\n", err)
+				fmt.Printf("\033[31m  Error: %v\033[0m\n", err)
 				continue
 			}
 
-			var result struct {
-				Response string `json:"response"`
-				Code     int    `json:"code"`
-				Message  string `json:"message"`
+			if err := dockerCmd.Start(); err != nil {
+				fmt.Printf("\033[31m  Error: %v\033[0m\n", err)
+				continue
 			}
-			json.NewDecoder(msgResp.Body).Decode(&result)
-			msgResp.Body.Close()
 
-			// Clear "thinking..."
-			fmt.Print("\r\033[K")
+			fmt.Print("\033[36m< \033[0m")
 
-			if result.Code != 0 {
-				fmt.Printf("\033[31m  Error: %s\033[0m\n\n", result.Message)
-			} else {
-				fmt.Printf("\033[36m< \033[0m%s\n\n", result.Response)
+			scanner := bufio.NewScanner(stdout)
+			scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+			var once sync.Once
+			hasOutput := false
+
+			for scanner.Scan() {
+				line := scanner.Text()
+				if line == "" {
+					continue
+				}
+
+				var event struct {
+					Type  string `json:"type"`
+					Event struct {
+						Type  string `json:"type"`
+						Delta struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+						} `json:"delta"`
+					} `json:"event"`
+					Result string `json:"result"`
+				}
+
+				if err := json.Unmarshal([]byte(line), &event); err != nil {
+					continue
+				}
+
+				switch event.Type {
+				case "stream_event":
+					if event.Event.Type == "content_block_delta" && event.Event.Delta.Type == "text_delta" {
+						fmt.Print(event.Event.Delta.Text)
+						hasOutput = true
+					}
+				case "result":
+					if !hasOutput && event.Result != "" {
+						once.Do(func() {
+							fmt.Print(event.Result)
+						})
+					}
+				}
 			}
+
+			dockerCmd.Wait()
+			fmt.Println()
+			fmt.Println()
+			msgCnt++
 		}
 
-		// Cleanup
 		fmt.Println("\n\033[2m  Stopping session...\033[0m")
-		req, _ := http.NewRequest("DELETE", addr+"/api/v1/session/"+session.ID, nil)
-		http.DefaultClient.Do(req)
+		stopSession()
 		fmt.Println("\033[32m  Session ended.\033[0m")
 	}),
 )

@@ -182,3 +182,7 @@ func (e *k8sExecutor) SendMessage(ctx context.Context, id string, message string
 func (e *k8sExecutor) StopSession(ctx context.Context, id string) error {
 	return fmt.Errorf("session mode not supported by k8s executor")
 }
+
+func (e *k8sExecutor) SendMessageStream(ctx context.Context, id string, message string, onToken executor.TokenCallback) (string, error) {
+	return "", fmt.Errorf("k8s session stream not yet supported")
+}

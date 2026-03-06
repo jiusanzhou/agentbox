@@ -13,6 +13,8 @@ import (
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/agentbox/internal/storage"
 	"go.zoe.im/agentbox/internal/store"
+	"encoding/json"
+	"net/http"
 	"go.zoe.im/x/talk"
 
 	// register default implementations
@@ -224,3 +226,51 @@ func shortID() string {
 }
 
 
+
+// StreamSessionMessage handles SSE streaming for session messages.
+// Registered as raw HTTP handler, not via talk reflection.
+func (s *Service) StreamSessionMessage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SessionID string `+"`"+`json:"session_id"`+"`"+`
+		Message   string `+"`"+`json:"message"`+"`"+`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	onToken := func(token string) {
+		data, _ := json.Marshal(map[string]string{"token": token})
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	result, err := s.engine.SendMessageStream(r.Context(), req.SessionID, req.Message, onToken)
+	if err != nil {
+		data, _ := json.Marshal(map[string]string{"error": err.Error()})
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+		return
+	}
+
+	// Send done event
+	data, _ := json.Marshal(map[string]string{"done": "true", "result": result})
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
+}
