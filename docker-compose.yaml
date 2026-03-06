@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  abox:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/etc/abox/config.yaml:ro
+      - abox-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    ports:
+      - "3000:3000"
+    environment:
+      - ABOX_API_URL=http://abox:8080
+    depends_on:
+      - abox
+
+volumes:
+  abox-data:
