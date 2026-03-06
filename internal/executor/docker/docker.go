@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"context"
@@ -46,6 +47,7 @@ type dockerExecutor struct {
 	mu            sync.Mutex
 	containers    map[string]string // runID -> containerID
 	sessionMsgCnt map[string]int    // runID -> message count
+	sessionBridge map[string]bool   // runID -> bridge available
 }
 
 func New(cfg Config) (executor.Executor, error) {
@@ -58,6 +60,7 @@ func New(cfg Config) (executor.Executor, error) {
 		logger:        slog.Default(),
 		containers:    make(map[string]string),
 		sessionMsgCnt: make(map[string]int),
+		sessionBridge: make(map[string]bool),
 	}, nil
 }
 
@@ -246,9 +249,44 @@ func (e *dockerExecutor) StartSession(ctx context.Context, req *executor.Request
 		args = append(args, "-v", fmt.Sprintf("%s:/home/agent/.claude.json:ro", claudeJSON))
 	}
 
+	// Auto-detect abox-bridge and inject MCP config
+	bridgeAddr := os.Getenv("ABOX_BRIDGE_ADDR")
+	if bridgeAddr == "" {
+		bridgeAddr = "host.docker.internal:9800"
+	}
+	// Check if bridge is reachable
+	bridgeAvailable := false
+	if conn, err := net.DialTimeout("tcp", strings.Replace(bridgeAddr, "host.docker.internal", "localhost", 1), time.Second); err == nil {
+		conn.Close()
+		bridgeAvailable = true
+	}
+
+	if bridgeAvailable {
+		// Add host.docker.internal resolution
+		args = append(args, "--add-host", "host.docker.internal:host-gateway")
+
+		// Create MCP config temp file
+		mcpConfig := fmt.Sprintf(`{"mcpServers":{"abox-bridge":{"url":"http://%s/sse"}}}`, bridgeAddr)
+		tmpFile, err := os.CreateTemp("", "abox-mcp-*.json")
+		if err == nil {
+			tmpFile.WriteString(mcpConfig)
+			tmpFile.Close()
+			args = append(args, "-v", fmt.Sprintf("%s:/home/agent/.claude/mcp.json:ro", tmpFile.Name()))
+			e.logger.Info("bridge detected, injecting MCP config", "addr", bridgeAddr)
+		}
+
+		// Also expose WebDAV addr
+		webdavAddr := os.Getenv("ABOX_WEBDAV_ADDR")
+		if webdavAddr == "" {
+			webdavAddr = "host.docker.internal:9801"
+		}
+		args = append(args, "-e", fmt.Sprintf("ABOX_WEBDAV_URL=http://%s", webdavAddr))
+		args = append(args, "-e", fmt.Sprintf("ABOX_BRIDGE_URL=http://%s", bridgeAddr))
+	}
+
 	args = append(args, image)
 
-	e.logger.Info("starting session container", "name", containerName, "image", image)
+	e.logger.Info("starting session container", "name", containerName, "image", image, "bridge", bridgeAvailable)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	if e.cfg.Host != "" {
@@ -264,9 +302,24 @@ func (e *dockerExecutor) StartSession(ctx context.Context, req *executor.Request
 
 	e.mu.Lock()
 	e.containers[req.ID] = containerName
+	e.sessionBridge[req.ID] = bridgeAvailable
 	e.mu.Unlock()
 
 	e.logger.Info("session container started", "name", containerName, "container_id", containerID[:12])
+
+	// If bridge available, write MCP config inside container
+	if bridgeAvailable {
+		mcpJSON := fmt.Sprintf(`{"mcpServers":{"abox-bridge":{"url":"http://%s/sse"}}}`, bridgeAddr)
+		writeCmd := exec.CommandContext(ctx, "docker", "exec", containerName,
+			"bash", "-c", fmt.Sprintf("echo '%s' > /tmp/mcp.json && chown agent:agent /tmp/mcp.json", mcpJSON))
+		if e.cfg.Host != "" {
+			writeCmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
+		}
+		if err := writeCmd.Run(); err != nil {
+			e.logger.Warn("failed to write MCP config", "err", err)
+		}
+	}
+
 	return containerID, nil
 }
 
@@ -287,12 +340,17 @@ func (e *dockerExecutor) SendMessage(ctx context.Context, id string, message str
 		"-u", "agent",
 		"-w", "/workspace",
 		"-e", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
+		"-e", "PATH=/home/agent/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		containerName,
 		"claude", "-p", "--dangerously-skip-permissions",
 	}
 	if msgCnt > 0 {
 		claudeArgs = append(claudeArgs, "--continue")
 	}
+	// MCP config injection disabled - WebDAV tools are more reliable
+	// if e.sessionBridge[id] {
+	// 	claudeArgs = append(claudeArgs, "--mcp-config", "/tmp/mcp.json")
+	// }
 	claudeArgs = append(claudeArgs, message)
 
 	cmd := exec.CommandContext(ctx, "docker", claudeArgs...)
@@ -346,6 +404,7 @@ func (e *dockerExecutor) StopSession(ctx context.Context, id string) error {
 	e.mu.Lock()
 	delete(e.containers, id)
 	delete(e.sessionMsgCnt, id)
+	delete(e.sessionBridge, id)
 	e.mu.Unlock()
 
 	return err
@@ -366,6 +425,7 @@ func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, messa
 		"-u", "agent",
 		"-w", "/workspace",
 		"-e", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
+		"-e", "PATH=/home/agent/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		containerName,
 		"claude", "-p", "--dangerously-skip-permissions",
 		"--output-format", "stream-json", "--verbose",
@@ -373,6 +433,10 @@ func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, messa
 	if msgCnt > 0 {
 		claudeArgs = append(claudeArgs, "--continue")
 	}
+	// MCP config injection disabled - WebDAV tools are more reliable
+	// if e.sessionBridge[id] {
+	// 	claudeArgs = append(claudeArgs, "--mcp-config", "/tmp/mcp.json")
+	// }
 	claudeArgs = append(claudeArgs, message)
 
 	cmd := exec.CommandContext(ctx, "docker", claudeArgs...)

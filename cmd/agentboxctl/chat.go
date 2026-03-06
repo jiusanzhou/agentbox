@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net"
 	"os"
 	osExec "os/exec"
 	"os/signal"
 	"strings"
 	"sync"
+	"time"
 	"syscall"
 
 	"github.com/chzyer/readline"
@@ -99,6 +101,15 @@ var chatCmd = cli.New(
 			os.Exit(0)
 		}()
 
+		// Detect bridge
+		bridgeActive := false
+		if conn, err := net.DialTimeout("tcp", "localhost:9800", time.Second); err == nil {
+			conn.Close()
+			bridgeActive = true
+			fmt.Println("  [32m✓[0m Bridge detected (MCP + WebDAV)")
+			fmt.Println()
+		}
+
 		msgCnt := 0
 
 		for {
@@ -126,6 +137,10 @@ var chatCmd = cli.New(
 				containerName,
 				"claude", "-p", "--dangerously-skip-permissions",
 				"--output-format", "stream-json", "--verbose",
+			}
+			// Inject MCP config if bridge detected
+			if bridgeActive {
+				claudeArgs = append(claudeArgs, "--mcp-config", "/home/agent/.claude/mcp.json")
 			}
 			if msgCnt > 0 {
 				claudeArgs = append(claudeArgs, "--continue")
