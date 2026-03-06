@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/chzyer/readline v1.5.1
+	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/mattn/go-sqlite3 v1.14.34
 	go.zoe.im/x v0.13.0
 	golang.org/x/net v0.51.0

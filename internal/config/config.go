@@ -28,6 +28,9 @@ type Config struct {
 
 	// Talk server transport config
 	Server x.TypedLazyConfig `json:"server,omitempty" yaml:"server" opts:"-"`
+
+	// Channel backends for IM integration (telegram, etc.)
+	Channels []x.TypedLazyConfig `json:"channels,omitempty" yaml:"channels" opts:"-"`
 }
 
 func (c *Config) String() string {

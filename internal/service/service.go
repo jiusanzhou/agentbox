@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"go.zoe.im/agentbox/internal/channel"
 	"go.zoe.im/agentbox/internal/config"
 	"go.zoe.im/agentbox/internal/engine"
 	"go.zoe.im/agentbox/internal/executor"
@@ -23,6 +24,9 @@ import (
 	_ "go.zoe.im/agentbox/internal/store/memory"
 	_ "go.zoe.im/agentbox/internal/store/sqlite"
 
+	// register channel implementations
+	_ "go.zoe.im/agentbox/internal/channel/telegram"
+
 	// register talk http transport
 	_ "go.zoe.im/x/talk/transport/http/std"
 )
@@ -33,6 +37,7 @@ type Service struct {
 	engine  *engine.Engine
 	storage storage.Storage
 	server  *talk.Server
+	router  *channel.Router
 	logger  *slog.Logger
 }
 
@@ -76,6 +81,19 @@ func New(cfg *config.Config) (*Service, error) {
 		logger:  logger,
 	}
 
+	// Initialize channel router if channels are configured.
+	if len(cfg.Channels) > 0 {
+		router := channel.NewRouter(eng, logger)
+		for _, chCfg := range cfg.Channels {
+			ch, err := channel.New(chCfg)
+			if err != nil {
+				return nil, fmt.Errorf("init channel %s: %w", chCfg.Type, err)
+			}
+			router.Add(ch)
+		}
+		svc.router = router
+	}
+
 	// Register endpoints via talk reflection
 	if err := server.Register(svc); err != nil {
 		return nil, fmt.Errorf("register endpoints: %w", err)
@@ -84,14 +102,22 @@ func New(cfg *config.Config) (*Service, error) {
 	return svc, nil
 }
 
-// Start runs the server.
+// Start runs the server and channel router.
 func (s *Service) Start(ctx context.Context) error {
+	if s.router != nil {
+		if err := s.router.Start(ctx); err != nil {
+			return fmt.Errorf("start channel router: %w", err)
+		}
+	}
 	s.logger.Info("starting agentbox", "addr", s.cfg.Addr)
 	return s.server.Serve(ctx)
 }
 
-// Shutdown gracefully stops the server.
+// Shutdown gracefully stops the server and channels.
 func (s *Service) Shutdown(ctx context.Context) error {
+	if s.router != nil {
+		_ = s.router.Stop(ctx)
+	}
 	return s.server.Shutdown(ctx)
 }
 
