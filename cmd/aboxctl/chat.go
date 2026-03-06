@@ -102,10 +102,10 @@ var chatCmd = cli.New(
 		}()
 
 		// Detect bridge
-		bridgeActive := false
+		_ = false // bridge detection for display only
 		if conn, err := net.DialTimeout("tcp", "localhost:9800", time.Second); err == nil {
 			conn.Close()
-			bridgeActive = true
+			_ = true
 			fmt.Println("  [32m✓[0m Bridge detected (MCP + WebDAV)")
 			fmt.Println()
 		}
@@ -134,13 +134,10 @@ var chatCmd = cli.New(
 				"-u", "agent",
 				"-w", "/workspace",
 				"-e", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
+				"-e", "PATH=/home/agent/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 				containerName,
 				"claude", "-p", "--dangerously-skip-permissions",
 				"--output-format", "stream-json", "--verbose",
-			}
-			// Inject MCP config if bridge detected
-			if bridgeActive {
-				claudeArgs = append(claudeArgs, "--mcp-config", "/home/agent/.claude/mcp.json")
 			}
 			if msgCnt > 0 {
 				claudeArgs = append(claudeArgs, "--continue")
