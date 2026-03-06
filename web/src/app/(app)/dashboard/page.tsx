@@ -3,16 +3,19 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { Run } from "@/lib/types";
 import { StatusBadge, formatTime, formatDuration } from "@/lib/run-utils";
+import { useAuth } from "@/lib/auth";
+import { clientFetch } from "@/lib/api";
 
 export default function DashboardPage() {
+  const { user } = useAuth();
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/runs")
+    clientFetch("/api/runs")
       .then((r) => r.json())
       .then((data) => setRuns(Array.isArray(data) ? data : []))
       .catch(() => setRuns([]))
@@ -31,17 +34,35 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Welcome back{user?.name ? `, ${user.name}` : ""}
+        </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Overview of your agent runs
+          Here&apos;s an overview of your agent activity
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Total Runs" value={stats.total} loading={loading} />
-        <StatCard title="Running" value={stats.running} loading={loading} accent="text-blue-400" />
+        <StatCard title="Active Sessions" value={stats.running} loading={loading} accent="text-blue-400" />
         <StatCard title="Completed" value={stats.completed} loading={loading} accent="text-emerald-400" />
         <StatCard title="Failed" value={stats.failed} loading={loading} accent="text-red-400" />
+      </div>
+
+      {/* Quick Actions */}
+      <div>
+        <h2 className="text-lg font-medium mb-3">Quick Actions</h2>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/runs/new">
+            <Button variant="outline" size="sm">New Run</Button>
+          </Link>
+          <Link href="/chat">
+            <Button variant="outline" size="sm">Start Chat</Button>
+          </Link>
+          <Link href="/skills">
+            <Button variant="outline" size="sm">Browse Skills</Button>
+          </Link>
+        </div>
       </div>
 
       <div>
@@ -107,7 +128,7 @@ function StatCard({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-mt-muted-foreground">
+        <CardTitle className="text-sm font-medium text-muted-foreground">
           {title}
         </CardTitle>
       </CardHeader>
