@@ -236,8 +236,8 @@ func (s *Service) StreamSessionMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		SessionID string `+"`"+`json:"session_id"`+"`"+`
-		Message   string `+"`"+`json:"message"`+"`"+`
+		SessionID string `json:"session_id"`
+		Message   string `json:"message"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
