@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "abox-bridge": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-proxy", "--transport", "sse", "http://host.docker.internal:9800/sse"]
+    }
+  }
+}
