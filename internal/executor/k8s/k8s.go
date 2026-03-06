@@ -1,9 +1,16 @@
 package k8s
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
 	"time"
 
 	"go.zoe.im/agentbox/internal/executor"
@@ -11,6 +18,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -19,9 +27,11 @@ import (
 
 // Config for kubernetes executor.
 type Config struct {
-	Kubeconfig string `json:"kubeconfig,omitempty" yaml:"kubeconfig"`
-	Namespace  string `json:"namespace" yaml:"namespace"`
-	Image      string `json:"image" yaml:"image"`
+	Kubeconfig    string `json:"kubeconfig,omitempty" yaml:"kubeconfig"`
+	Namespace     string `json:"namespace" yaml:"namespace"`
+	Image         string `json:"image" yaml:"image"`
+	CPURequest    string `json:"cpu_request,omitempty" yaml:"cpu_request"`
+	MemoryRequest string `json:"memory_request,omitempty" yaml:"memory_request"`
 }
 
 func init() {
@@ -39,6 +49,14 @@ type k8sExecutor struct {
 	namespace string
 	image     string
 	logger    *slog.Logger
+
+	mu            sync.Mutex
+	sessions      map[string]string // runID -> podName
+	sessionMsgCnt map[string]int    // runID -> message count
+	kubeconfig    string            // for kubectl CLI
+
+	cpuRequest    string
+	memoryRequest string
 }
 
 func New(cfg Config) (executor.Executor, error) {
@@ -64,11 +82,25 @@ func New(cfg Config) (executor.Executor, error) {
 		ns = "agentbox"
 	}
 
+	cpuReq := cfg.CPURequest
+	if cpuReq == "" {
+		cpuReq = "500m"
+	}
+	memReq := cfg.MemoryRequest
+	if memReq == "" {
+		memReq = "512Mi"
+	}
+
 	return &k8sExecutor{
-		client:    client,
-		namespace: ns,
-		image:     cfg.Image,
-		logger:    slog.Default(),
+		client:        client,
+		namespace:     ns,
+		image:         cfg.Image,
+		logger:        slog.Default(),
+		sessions:      make(map[string]string),
+		sessionMsgCnt: make(map[string]int),
+		kubeconfig:    cfg.Kubeconfig,
+		cpuRequest:    cpuReq,
+		memoryRequest: memReq,
 	}, nil
 }
 
@@ -158,9 +190,33 @@ func (e *k8sExecutor) waitForJob(ctx context.Context, name string, timeout time.
 	}
 }
 
+// Logs gets pod logs by the agentbox/run label.
 func (e *k8sExecutor) Logs(ctx context.Context, id string) (string, error) {
-	// TODO: get pod logs by job label selector
-	return "", nil
+	pods, err := e.client.CoreV1().Pods(e.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("agentbox/run=%s", id),
+	})
+	if err != nil {
+		return "", fmt.Errorf("list pods: %w", err)
+	}
+	if len(pods.Items) == 0 {
+		return "", fmt.Errorf("no pods found for run %s", id)
+	}
+
+	logOpts := &corev1.PodLogOptions{
+		Container: "agent",
+	}
+	req := e.client.CoreV1().Pods(e.namespace).GetLogs(pods.Items[0].Name, logOpts)
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get logs: %w", err)
+	}
+	defer stream.Close()
+
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(stream); err != nil {
+		return "", fmt.Errorf("read logs: %w", err)
+	}
+	return strings.TrimSpace(buf.String()), nil
 }
 
 func (e *k8sExecutor) Stop(ctx context.Context, id string) error {
@@ -171,18 +227,254 @@ func (e *k8sExecutor) Stop(ctx context.Context, id string) error {
 	})
 }
 
+// StartSession creates a long-running Pod for interactive session mode.
 func (e *k8sExecutor) StartSession(ctx context.Context, req *executor.Request) (string, error) {
-	return "", fmt.Errorf("session mode not supported by k8s executor")
+	podName := fmt.Sprintf("abox-%s", req.ID)
+
+	image := req.Image
+	if image == "" {
+		image = e.image
+	}
+
+	envVars := []corev1.EnvVar{
+		{Name: "AGENTBOX_RUN_ID", Value: req.ID},
+		{Name: "AGENTBOX_AGENT_FILE", Value: req.AgentFile},
+		{Name: "AGENTBOX_MODE", Value: "session"},
+	}
+	for k, v := range req.Env {
+		envVars = append(envVars, corev1.EnvVar{Name: k, Value: v})
+	}
+
+	// Pass through ABOX_WEBDAV_URL if set
+	if webdavURL := os.Getenv("ABOX_WEBDAV_URL"); webdavURL != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: "ABOX_WEBDAV_URL", Value: webdavURL})
+	}
+
+	labels := map[string]string{
+		"app":            "agentbox",
+		"agentbox/run":   req.ID,
+		"agentbox/mode":  "session",
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: e.namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{{
+				Name:    "agent",
+				Image:   image,
+				Env:     envVars,
+				Command: []string{"/opt/agentbox/entrypoint.sh"},
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse(e.cpuRequest),
+						corev1.ResourceMemory: resource.MustParse(e.memoryRequest),
+					},
+				},
+			}},
+		},
+	}
+
+	e.logger.Info("creating session pod", "name", podName, "image", image)
+
+	if _, err := e.client.CoreV1().Pods(e.namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return "", fmt.Errorf("create pod: %w", err)
+	}
+
+	// Wait for pod to be Running
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	timeout := time.After(60 * time.Second)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-timeout:
+			// Clean up the pod on timeout
+			_ = e.client.CoreV1().Pods(e.namespace).Delete(ctx, podName, metav1.DeleteOptions{})
+			return "", fmt.Errorf("pod %s did not become Running within 60s", podName)
+		case <-ticker.C:
+			p, err := e.client.CoreV1().Pods(e.namespace).Get(ctx, podName, metav1.GetOptions{})
+			if err != nil {
+				return "", fmt.Errorf("get pod: %w", err)
+			}
+			if p.Status.Phase == corev1.PodRunning {
+				e.mu.Lock()
+				e.sessions[req.ID] = podName
+				e.mu.Unlock()
+
+				e.logger.Info("session pod running", "name", podName)
+				return podName, nil
+			}
+			if p.Status.Phase == corev1.PodFailed || p.Status.Phase == corev1.PodSucceeded {
+				return "", fmt.Errorf("pod %s entered %s phase unexpectedly", podName, p.Status.Phase)
+			}
+		}
+	}
 }
 
+// SendMessage executes claude -p in a running session pod via kubectl exec.
 func (e *k8sExecutor) SendMessage(ctx context.Context, id string, message string) (string, error) {
-	return "", fmt.Errorf("session mode not supported by k8s executor")
+	e.mu.Lock()
+	podName, ok := e.sessions[id]
+	msgCnt := e.sessionMsgCnt[id]
+	e.sessionMsgCnt[id] = msgCnt + 1
+	e.mu.Unlock()
+
+	if !ok {
+		podName = fmt.Sprintf("abox-%s", id)
+	}
+
+	args := e.kubectlArgs("exec", podName, "-c", "agent", "--")
+	args = append(args,
+		"env", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
+		"PATH=/home/agent/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+	)
+	args = append(args, "claude", "-p", "--dangerously-skip-permissions")
+	if msgCnt > 0 {
+		args = append(args, "--continue")
+	}
+	args = append(args, message)
+
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	if e.kubeconfig != "" {
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+e.kubeconfig)
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	e.logger.Info("sending message to session", "pod", podName)
+
+	if err := cmd.Run(); err != nil {
+		output := stdout.String()
+		if stderr.Len() > 0 {
+			output += "\n" + stderr.String()
+		}
+		return output, fmt.Errorf("kubectl exec: %w", err)
+	}
+
+	return strings.TrimSpace(stdout.String()), nil
 }
 
-func (e *k8sExecutor) StopSession(ctx context.Context, id string) error {
-	return fmt.Errorf("session mode not supported by k8s executor")
-}
-
+// SendMessageStream executes claude -p with stream-json output in a running session pod.
 func (e *k8sExecutor) SendMessageStream(ctx context.Context, id string, message string, onToken executor.TokenCallback) (string, error) {
-	return "", fmt.Errorf("k8s session stream not yet supported")
+	e.mu.Lock()
+	podName, ok := e.sessions[id]
+	msgCnt := e.sessionMsgCnt[id]
+	e.sessionMsgCnt[id] = msgCnt + 1
+	e.mu.Unlock()
+
+	if !ok {
+		podName = fmt.Sprintf("abox-%s", id)
+	}
+
+	args := e.kubectlArgs("exec", podName, "-c", "agent", "--")
+	args = append(args,
+		"env", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
+		"PATH=/home/agent/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+	)
+	args = append(args, "claude", "-p", "--dangerously-skip-permissions",
+		"--output-format", "stream-json", "--verbose")
+	if msgCnt > 0 {
+		args = append(args, "--continue")
+	}
+	args = append(args, message)
+
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	if e.kubeconfig != "" {
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+e.kubeconfig)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+
+	e.logger.Info("streaming message to session", "pod", podName)
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("kubectl exec start: %w", err)
+	}
+
+	var fullResponse strings.Builder
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var event struct {
+			Type  string `json:"type"`
+			Event struct {
+				Type  string `json:"type"`
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+			} `json:"event"`
+			Result string `json:"result"`
+		}
+
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+
+		switch event.Type {
+		case "stream_event":
+			if event.Event.Type == "content_block_delta" && event.Event.Delta.Type == "text_delta" {
+				token := event.Event.Delta.Text
+				fullResponse.WriteString(token)
+				if onToken != nil {
+					onToken(token)
+				}
+			}
+		case "result":
+			if event.Result != "" && fullResponse.Len() == 0 {
+				fullResponse.WriteString(event.Result)
+			}
+		}
+	}
+
+	cmd.Wait()
+	return fullResponse.String(), nil
+}
+
+// StopSession deletes the session pod.
+func (e *k8sExecutor) StopSession(ctx context.Context, id string) error {
+	podName := fmt.Sprintf("abox-%s", id)
+
+	e.logger.Info("stopping session pod", "name", podName)
+
+	gracePeriod := int64(10)
+	err := e.client.CoreV1().Pods(e.namespace).Delete(ctx, podName, metav1.DeleteOptions{
+		GracePeriodSeconds: &gracePeriod,
+	})
+
+	e.mu.Lock()
+	delete(e.sessions, id)
+	delete(e.sessionMsgCnt, id)
+	e.mu.Unlock()
+
+	return err
+}
+
+// kubectlArgs builds kubectl arguments with namespace and optional kubeconfig.
+func (e *k8sExecutor) kubectlArgs(args ...string) []string {
+	var result []string
+	if e.kubeconfig != "" {
+		result = append(result, "--kubeconfig", e.kubeconfig)
+	}
+	result = append(result, "-n", e.namespace)
+	result = append(result, args...)
+	return result
 }
