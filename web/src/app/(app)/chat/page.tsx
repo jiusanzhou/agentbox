@@ -81,7 +81,7 @@ export default function ChatPage() {
     try {
       const res = await clientFetch("/api/sessions/message", {
         method: "POST",
-        body: JSON.stringify({ session_id: sessionId, content: text }),
+        body: JSON.stringify({ session_id: sessionId, message: text }),
       });
       const data = await res.json();
 
