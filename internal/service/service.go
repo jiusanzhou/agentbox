@@ -4,20 +4,23 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"strings"
 
-	"go.zoe.im/agentbox/internal/channel"
 	"go.zoe.im/agentbox/internal/auth"
+	"go.zoe.im/agentbox/internal/channel"
 	"go.zoe.im/agentbox/internal/config"
 	"go.zoe.im/agentbox/internal/engine"
 	"go.zoe.im/agentbox/internal/executor"
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/agentbox/internal/storage"
 	"go.zoe.im/agentbox/internal/store"
-	"encoding/json"
-	"net/http"
+	"go.zoe.im/agentbox/internal/tunnel"
 	"go.zoe.im/x/talk"
+	stdhttp "go.zoe.im/x/talk/transport/http/std"
 
 	// register default implementations
 	_ "go.zoe.im/agentbox/internal/executor/docker"
@@ -27,9 +30,6 @@ import (
 
 	// register channel implementations
 	_ "go.zoe.im/agentbox/internal/channel/telegram"
-
-	// register talk http transport
-	_ "go.zoe.im/x/talk/transport/http/std"
 )
 
 // Service is the main application service.
@@ -40,6 +40,8 @@ type Service struct {
 	server  *talk.Server
 	router  *channel.Router
 	auth    *auth.Auth
+	hub     *tunnel.Hub
+	mux     *http.ServeMux
 	logger  *slog.Logger
 }
 
@@ -73,13 +75,40 @@ func New(cfg *config.Config) (*Service, error) {
 		authInst = auth.New(s, cfg.Auth.JWTSecret)
 	}
 
-	// Create talk server
-	server, err := talk.NewServerFromConfig(cfg.Server,
-		talk.WithPathPrefix("/api/v1"),
-	)
+	// Create shared HTTP mux for both talk endpoints and tunnel WebSocket
+	mux := http.NewServeMux()
+
+	// Create talk transport with shared mux
+	transport, err := stdhttp.NewServer(cfg.Server, stdhttp.WithServeMux(mux))
 	if err != nil {
-		return nil, fmt.Errorf("init server: %w", err)
+		return nil, fmt.Errorf("init transport: %w", err)
 	}
+
+	// Create talk server
+	server := talk.NewServer(transport, talk.WithPathPrefix("/api/v1"))
+
+	// Create tunnel hub with token validator
+	hub := tunnel.NewHub(logger, func(token string) (string, error) {
+		if authInst == nil {
+			return "anonymous", nil
+		}
+		// Try JWT first, then API key
+		if strings.HasPrefix(token, "ak_") {
+			user, err := authInst.ValidateAPIKey(context.Background(), token)
+			if err != nil {
+				return "", err
+			}
+			return user.ID, nil
+		}
+		user, err := authInst.ValidateToken(context.Background(), token)
+		if err != nil {
+			return "", err
+		}
+		return user.ID, nil
+	})
+
+	// Register tunnel WebSocket endpoint on shared mux
+	mux.HandleFunc("GET /api/v1/tunnel", hub.HandleConnect)
 
 	svc := &Service{
 		cfg:     cfg,
@@ -87,6 +116,8 @@ func New(cfg *config.Config) (*Service, error) {
 		storage: st,
 		server:  server,
 		auth:    authInst,
+		hub:     hub,
+		mux:     mux,
 		logger:  logger,
 	}
 
@@ -118,8 +149,29 @@ func (s *Service) Start(ctx context.Context) error {
 			return fmt.Errorf("start channel router: %w", err)
 		}
 	}
+
+	// Start tunnel proxy for sandbox containers
+	if s.cfg.TunnelProxyAddr != "" {
+		proxy := tunnel.NewProxy(s.hub, s.cfg.TunnelProxyAddr, s.logger)
+		go func() {
+			if err := proxy.Start(ctx); err != nil && err != http.ErrServerClosed {
+				s.logger.Error("tunnel proxy error", "err", err)
+			}
+		}()
+	}
+
+	// Register talk endpoints on the shared mux
+	s.server.Serve(ctx)
+
+	// The talk server with external mux just registered endpoints and returned.
+	// Now start our own HTTP server with the shared mux.
 	s.logger.Info("starting agentbox", "addr", s.cfg.Addr)
-	return s.server.Serve(ctx)
+	httpSrv := &http.Server{Addr: s.cfg.Addr, Handler: s.mux}
+	go func() {
+		<-ctx.Done()
+		httpSrv.Shutdown(context.Background())
+	}()
+	return httpSrv.ListenAndServe()
 }
 
 // Shutdown gracefully stops the server and channels.

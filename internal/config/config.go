@@ -34,6 +34,9 @@ type Config struct {
 
 	// Channel backends for IM integration (telegram, etc.)
 	Channels []x.TypedLazyConfig `json:"channels,omitempty" yaml:"channels" opts:"-"`
+
+	// Tunnel proxy address for sandbox containers
+	TunnelProxyAddr string `json:"tunnel_proxy_addr,omitempty" yaml:"tunnel_proxy_addr" opts:"env=ABOX_TUNNEL_PROXY_ADDR"`
 }
 
 func (c *Config) String() string {

@@ -87,3 +87,10 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 	return nil
 }
+
+// NewHandler returns an http.Handler for the given roots without starting a server.
+// Useful for in-process request handling (e.g. tunnel client).
+func NewHandler(roots []string) http.Handler {
+	fs := &multiRootFS{roots: roots}
+	return fs.handler()
+}
