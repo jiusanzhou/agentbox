@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { clientFetch } from "@/lib/api";
+import { clientFetch, getAiSettings } from "@/lib/api";
 import type { Session, Message } from "@/lib/types";
 
 export default function ChatPage() {
@@ -17,7 +17,6 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load sessions
   useEffect(() => {
@@ -35,13 +34,6 @@ export default function ChatPage() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
-
-  // Cleanup poll on unmount
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearTimeout(pollRef.current);
-    };
-  }, []);
 
   const createSession = useCallback(async (systemPrompt?: string) => {
     try {
@@ -78,57 +70,80 @@ export default function ChatPage() {
     const userMsg: Message = { role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
 
+    // Add empty assistant message for streaming
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
     try {
-      const res = await clientFetch("/api/sessions/message", {
+      const token = typeof window !== "undefined" ? localStorage.getItem("abox_token") : null;
+      const ai = getAiSettings();
+
+      const res = await fetch("/api/sessions/stream", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(ai?.apiKey ? { "x-api-key": ai.apiKey } : {}),
+          ...(ai?.baseUrl ? { "x-base-url": ai.baseUrl } : {}),
+          ...(ai?.model ? { "x-model": ai.model } : {}),
+        },
         body: JSON.stringify({ session_id: sessionId, message: text }),
       });
-      const data = await res.json();
 
-      if (data.content || data.message) {
-        const assistantMsg: Message = {
-          role: "assistant",
-          content: data.content || data.message,
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-      } else if (data.status === "processing") {
-        // Poll for response
-        const poll = async (attempts: number) => {
-          if (attempts > 100) {
-            setSending(false);
-            return;
-          }
-          try {
-            const pollRes = await clientFetch("/api/sessions/message", {
-              method: "POST",
-              body: JSON.stringify({
-                session_id: sessionId,
-                content: "",
-                poll: true,
-              }),
-            });
-            const pollData = await pollRes.json();
-            if (pollData.content || pollData.message) {
-              setMessages((prev) => [
-                ...prev,
-                { role: "assistant", content: pollData.content || pollData.message },
-              ]);
-              setSending(false);
-            } else {
-              pollRef.current = setTimeout(() => poll(attempts + 1), 100);
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.token) {
+                fullText += data.token;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { role: "assistant", content: fullText };
+                  return updated;
+                });
+              }
+              if (data.done) {
+                if (data.result) {
+                  fullText = data.result;
+                  setMessages((prev) => {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = { role: "assistant", content: fullText };
+                    return updated;
+                  });
+                }
+              }
+              if (data.error) {
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { role: "assistant", content: `Error: ${data.error}` };
+                  return updated;
+                });
+              }
+            } catch {
+              // ignore parse errors for partial SSE chunks
             }
-          } catch {
-            setSending(false);
           }
-        };
-        poll(0);
-        return;
+        }
       }
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Failed to send message. Please try again." },
-      ]);
+      setMessages((prev) => {
+        const updated = [...prev];
+        if (updated[updated.length - 1]?.role === "assistant" && !updated[updated.length - 1]?.content) {
+          updated[updated.length - 1] = { role: "assistant", content: "Failed to send message." };
+        }
+        return updated;
+      });
     }
     setSending(false);
   }, [input, sending, activeSessionId, createSession]);
@@ -241,19 +256,14 @@ export default function ChatPage() {
                         : "bg-muted"
                     )}
                   >
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  </Card>
-                </div>
-              ))}
-              {sending && (
-                <div className="flex justify-start">
-                  <Card className="bg-muted px-4 py-3">
-                    <p className="text-sm text-muted-foreground animate-pulse">
-                      Thinking...
+                    <p className="text-sm whitespace-pre-wrap">
+                      {msg.content || (sending && msg.role === "assistant" ? (
+                        <span className="text-muted-foreground animate-pulse">Thinking...</span>
+                      ) : msg.content)}
                     </p>
                   </Card>
                 </div>
-              )}
+              ))}
             </div>
           )}
         </div>

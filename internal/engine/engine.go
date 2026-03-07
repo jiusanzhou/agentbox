@@ -210,3 +210,30 @@ func (e *Engine) SendMessageStream(ctx context.Context, runID string, message st
 	}
 	return e.executor.SendMessageStream(ctx, runID, message, onToken)
 }
+
+// RecoverSessions scans for running containers/pods and reconciles with the store.
+func (e *Engine) RecoverSessions(ctx context.Context) error {
+	ids, err := e.executor.RecoverSessions(ctx)
+	if err != nil {
+		e.logger.Warn("failed to recover sessions", "err", err)
+		return err
+	}
+
+	recovered := 0
+	for _, id := range ids {
+		run, err := e.store.GetRun(ctx, id)
+		if err != nil {
+			e.logger.Warn("orphan container found (no store record)", "id", id)
+			continue
+		}
+		if run.Status != model.RunStatusRunning {
+			run.Status = model.RunStatusRunning
+			_ = e.store.UpdateRun(ctx, run)
+		}
+		recovered++
+		e.logger.Info("recovered session", "id", id)
+	}
+
+	e.logger.Info("session recovery complete", "recovered", recovered)
+	return nil
+}

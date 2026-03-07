@@ -478,3 +478,29 @@ func (e *k8sExecutor) kubectlArgs(args ...string) []string {
 	result = append(result, args...)
 	return result
 }
+
+// RecoverSessions lists running session pods and re-registers them.
+func (e *k8sExecutor) RecoverSessions(ctx context.Context) ([]string, error) {
+	pods, err := e.client.CoreV1().Pods(e.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=agentbox,agentbox/mode=session",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list pods: %w", err)
+	}
+
+	var ids []string
+	for _, pod := range pods.Items {
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		runID := pod.Labels["agentbox/run"]
+		if runID == "" {
+			continue
+		}
+		e.mu.Lock()
+		e.sessions[runID] = pod.Name
+		e.mu.Unlock()
+		ids = append(ids, runID)
+	}
+	return ids, nil
+}

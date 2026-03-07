@@ -20,12 +20,19 @@ export async function proxyRequestWithAuth(
   init?: RequestInit
 ): Promise<Response> {
   const authHeader = request.headers.get("Authorization");
+  const apiKey = request.headers.get("x-api-key");
+  const baseUrl = request.headers.get("x-base-url");
+  const model = request.headers.get("x-model");
+
   const url = `${API_BASE}${path}`;
   return fetch(url, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       ...(authHeader ? { Authorization: authHeader } : {}),
+      ...(apiKey ? { "x-api-key": apiKey } : {}),
+      ...(baseUrl ? { "x-base-url": baseUrl } : {}),
+      ...(model ? { "x-model": model } : {}),
       ...init?.headers,
     },
   });

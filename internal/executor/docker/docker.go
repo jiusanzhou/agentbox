@@ -466,14 +466,13 @@ func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, messa
 		}
 
 		var event struct {
-			Type  string `json:"type"`
-			Event struct {
-				Type  string `json:"type"`
-				Delta struct {
+			Type    string `json:"type"`
+			Message struct {
+				Content []struct {
 					Type string `json:"type"`
 					Text string `json:"text"`
-				} `json:"delta"`
-			} `json:"event"`
+				} `json:"content"`
+			} `json:"message"`
 			Result string `json:"result"`
 		}
 
@@ -482,12 +481,24 @@ func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, messa
 		}
 
 		switch event.Type {
-		case "stream_event":
-			if event.Event.Type == "content_block_delta" && event.Event.Delta.Type == "text_delta" {
-				token := event.Event.Delta.Text
-				fullResponse.WriteString(token)
-				if onToken != nil {
-					onToken(token)
+		case "assistant":
+			// Claude Code 2.1.61 stream-json format
+			for _, c := range event.Message.Content {
+				if c.Type == "text" && c.Text != "" {
+					text := c.Text
+					// Extract new tokens by comparing with what we have
+					existing := fullResponse.String()
+					if len(text) > len(existing) {
+						token := text[len(existing):]
+						fullResponse.Reset()
+						fullResponse.WriteString(text)
+						if onToken != nil {
+							onToken(token)
+						}
+					} else if text != existing {
+						fullResponse.Reset()
+						fullResponse.WriteString(text)
+					}
 				}
 			}
 		case "result":
@@ -499,4 +510,29 @@ func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, messa
 
 	cmd.Wait()
 	return fullResponse.String(), nil
+}
+
+// RecoverSessions lists running containers with the "abox-" prefix and re-registers them.
+func (e *dockerExecutor) RecoverSessions(ctx context.Context) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "ps", "--filter", "name=abox-", "--format", "{{.Names}}")
+	if e.cfg.Host != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("docker ps: %w", err)
+	}
+
+	var ids []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		id := strings.TrimPrefix(line, "abox-")
+		e.mu.Lock()
+		e.containers[id] = line
+		e.mu.Unlock()
+		ids = append(ids, id)
+	}
+	return ids, nil
 }

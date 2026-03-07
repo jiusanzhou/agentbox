@@ -32,6 +32,39 @@ import (
 	_ "go.zoe.im/agentbox/internal/channel/telegram"
 )
 
+// Context keys for API provider headers.
+type contextKey string
+
+const (
+	apiKeyContextKey  contextKey = "x_api_key"
+	baseURLContextKey contextKey = "x_base_url"
+	modelContextKey   contextKey = "x_model"
+)
+
+// APIKeyFromContext returns the Anthropic API key from context (set by middleware).
+func APIKeyFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(apiKeyContextKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// BaseURLFromContext returns the base URL override from context.
+func BaseURLFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(baseURLContextKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// ModelFromContext returns the model override from context.
+func ModelFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(modelContextKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // Service is the main application service.
 type Service struct {
 	cfg     *config.Config
@@ -121,6 +154,9 @@ func New(cfg *config.Config) (*Service, error) {
 		logger:  logger,
 	}
 
+	// Register SSE streaming endpoint (raw HTTP, not via talk)
+	mux.HandleFunc("POST /api/v1/stream", svc.StreamSessionMessage)
+
 	// Initialize channel router if channels are configured.
 	if len(cfg.Channels) > 0 {
 		router := channel.NewRouter(eng, logger)
@@ -144,6 +180,11 @@ func New(cfg *config.Config) (*Service, error) {
 
 // Start runs the server and channel router.
 func (s *Service) Start(ctx context.Context) error {
+	// Recover existing sessions from running containers/pods
+	if err := s.engine.RecoverSessions(ctx); err != nil {
+		s.logger.Warn("session recovery failed", "err", err)
+	}
+
 	if s.router != nil {
 		if err := s.router.Start(ctx); err != nil {
 			return fmt.Errorf("start channel router: %w", err)
@@ -170,12 +211,31 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.auth != nil {
 		handler = s.auth.Middleware(handler)
 	}
+	// Middleware to extract API provider headers into context
+	handler = apiHeaderMiddleware(handler)
 	httpSrv := &http.Server{Addr: s.cfg.Addr, Handler: handler}
 	go func() {
 		<-ctx.Done()
 		httpSrv.Shutdown(context.Background())
 	}()
 	return httpSrv.ListenAndServe()
+}
+
+// apiHeaderMiddleware extracts x-api-key, x-base-url, x-model headers into context.
+func apiHeaderMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if v := r.Header.Get("x-api-key"); v != "" {
+			ctx = context.WithValue(ctx, apiKeyContextKey, v)
+		}
+		if v := r.Header.Get("x-base-url"); v != "" {
+			ctx = context.WithValue(ctx, baseURLContextKey, v)
+		}
+		if v := r.Header.Get("x-model"); v != "" {
+			ctx = context.WithValue(ctx, modelContextKey, v)
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // Shutdown gracefully stops the server and channels.
@@ -259,6 +319,26 @@ func (s *Service) CreateSession(ctx context.Context, req *CreateSessionRequest) 
 		Mode:      model.RunModeSession,
 		AgentFile: req.AgentFile,
 		Config:    req.Config,
+	}
+
+	// Inject API provider settings from request headers (via context middleware)
+	if apiKey := APIKeyFromContext(ctx); apiKey != "" {
+		if run.Config.Env == nil {
+			run.Config.Env = make(map[string]string)
+		}
+		run.Config.Env["ANTHROPIC_API_KEY"] = apiKey
+	}
+	if baseURL := BaseURLFromContext(ctx); baseURL != "" {
+		if run.Config.Env == nil {
+			run.Config.Env = make(map[string]string)
+		}
+		run.Config.Env["ANTHROPIC_BASE_URL"] = baseURL
+	}
+	if model := ModelFromContext(ctx); model != "" {
+		if run.Config.Env == nil {
+			run.Config.Env = make(map[string]string)
+		}
+		run.Config.Env["ANTHROPIC_MODEL"] = model
 	}
 
 	if err := s.engine.StartSession(ctx, run); err != nil {
@@ -352,12 +432,34 @@ func (s *Service) StreamSessionMessage(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	result, err := s.engine.SendMessageStream(r.Context(), req.SessionID, req.Message, onToken)
+	var tokensSent bool
+	wrappedOnToken := func(token string) {
+		tokensSent = true
+		onToken(token)
+	}
+
+	result, err := s.engine.SendMessageStream(r.Context(), req.SessionID, req.Message, wrappedOnToken)
 	if err != nil {
 		data, _ := json.Marshal(map[string]string{"error": err.Error()})
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
 		return
+	}
+
+	// If no streaming tokens were sent, simulate typing effect
+	if !tokensSent && result != "" {
+		runes := []rune(result)
+		chunkSize := 4 // characters per SSE event
+		for i := 0; i < len(runes); i += chunkSize {
+			end := i + chunkSize
+			if end > len(runes) {
+				end = len(runes)
+			}
+			token := string(runes[i:end])
+			data, _ := json.Marshal(map[string]string{"token": token})
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
 	}
 
 	// Send done event

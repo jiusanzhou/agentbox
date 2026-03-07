@@ -49,6 +49,9 @@ type Executor interface {
 	SendMessage(ctx context.Context, id string, message string) (string, error)
 	SendMessageStream(ctx context.Context, id string, message string, onToken TokenCallback) (string, error)
 	StopSession(ctx context.Context, id string) error
+
+	// RecoverSessions returns IDs of running session containers/pods.
+	RecoverSessions(ctx context.Context) ([]string, error)
 }
 
 func New(cfg x.TypedLazyConfig) (Executor, error) {
