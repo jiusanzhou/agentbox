@@ -29,6 +29,7 @@ type Run struct {
 	Name      string     `json:"name"`
 	Mode      RunMode    `json:"mode"`
 	Status    RunStatus  `json:"status"`
+	Runtime   string     `json:"runtime,omitempty"`
 	AgentFile string     `json:"agent_file"`
 	Config    RunConfig  `json:"config"`
 	Result    *Result    `json:"result,omitempty"`

@@ -137,6 +137,7 @@ func (e *Engine) StartSession(ctx context.Context, run *model.Run) error {
 		ID:        run.ID,
 		AgentFile: run.AgentFile,
 		Image:     run.Config.Image,
+		Runtime:   run.Runtime,
 		Env:       run.Config.Env,
 	}
 
@@ -295,4 +296,14 @@ func (e *Engine) RecoverSessions(ctx context.Context) error {
 
 	e.logger.Info("session recovery complete", "recovered", recovered)
 	return nil
+}
+
+// UploadFile copies a file into a running session container.
+func (e *Engine) UploadFile(ctx context.Context, runID string, filename string, data []byte) error {
+	return e.executor.UploadFile(ctx, runID, filename, data)
+}
+
+// StreamLogs streams container logs line by line.
+func (e *Engine) StreamLogs(ctx context.Context, runID string) (<-chan string, error) {
+	return e.executor.StreamLogs(ctx, runID)
 }

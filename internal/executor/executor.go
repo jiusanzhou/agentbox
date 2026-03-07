@@ -18,6 +18,7 @@ type Request struct {
 	ID        string
 	AgentFile string
 	Image     string
+	Runtime   string
 	Env       map[string]string
 	Timeout   int
 	Volumes   []VolumeMount
@@ -52,6 +53,12 @@ type Executor interface {
 
 	// RecoverSessions returns IDs of running session containers/pods.
 	RecoverSessions(ctx context.Context) ([]string, error)
+
+	// UploadFile copies a file into a running session container at /workspace/uploads/.
+	UploadFile(ctx context.Context, runID string, filename string, data []byte) error
+
+	// StreamLogs streams container logs line by line.
+	StreamLogs(ctx context.Context, runID string) (<-chan string, error)
 }
 
 func New(cfg x.TypedLazyConfig) (Executor, error) {

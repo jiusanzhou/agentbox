@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -503,4 +504,76 @@ func (e *k8sExecutor) RecoverSessions(ctx context.Context) ([]string, error) {
 		ids = append(ids, runID)
 	}
 	return ids, nil
+}
+
+// UploadFile copies a file into a running session pod at /workspace/uploads/.
+func (e *k8sExecutor) UploadFile(ctx context.Context, id string, filename string, data []byte) error {
+	e.mu.Lock()
+	podName, ok := e.sessions[id]
+	e.mu.Unlock()
+
+	if !ok {
+		podName = fmt.Sprintf("abox-%s", id)
+	}
+
+	// Ensure uploads directory exists, then write file via kubectl exec + base64
+	encoded := base64Encode(data)
+	script := fmt.Sprintf("mkdir -p /workspace/uploads && echo '%s' | base64 -d > /workspace/uploads/%s", encoded, filename)
+	args := e.kubectlArgs("exec", podName, "-c", "agent", "--", "sh", "-c", script)
+
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	if e.kubeconfig != "" {
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+e.kubeconfig)
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("kubectl exec: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// StreamLogs streams pod logs line by line via a channel.
+func (e *k8sExecutor) StreamLogs(ctx context.Context, id string) (<-chan string, error) {
+	e.mu.Lock()
+	podName, ok := e.sessions[id]
+	e.mu.Unlock()
+
+	if !ok {
+		podName = fmt.Sprintf("abox-%s", id)
+	}
+
+	args := e.kubectlArgs("logs", "-f", "--tail=100", podName, "-c", "agent")
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	if e.kubeconfig != "" {
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+e.kubeconfig)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("kubectl logs start: %w", err)
+	}
+
+	ch := make(chan string, 64)
+	go func() {
+		defer close(ch)
+		defer cmd.Wait()
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 64*1024), 64*1024)
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- scanner.Text():
+			}
+		}
+	}()
+
+	return ch, nil
+}
+
+func base64Encode(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
 }

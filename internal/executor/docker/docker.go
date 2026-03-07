@@ -1,9 +1,9 @@
 package docker
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"go.zoe.im/agentbox/internal/executor"
+	"go.zoe.im/agentbox/internal/runtime"
 	"go.zoe.im/x"
 )
 
@@ -44,10 +45,11 @@ type dockerExecutor struct {
 	cfg    Config
 	logger *slog.Logger
 
-	mu            sync.Mutex
-	containers    map[string]string // runID -> containerID
-	sessionMsgCnt map[string]int    // runID -> message count
-	sessionBridge map[string]bool   // runID -> bridge available
+	mu             sync.Mutex
+	containers     map[string]string          // runID -> containerID
+	sessionMsgCnt  map[string]int             // runID -> message count
+	sessionBridge  map[string]bool            // runID -> bridge available
+	sessionRuntime map[string]runtime.Runtime // runID -> runtime
 }
 
 func New(cfg Config) (executor.Executor, error) {
@@ -56,11 +58,12 @@ func New(cfg Config) (executor.Executor, error) {
 		return nil, fmt.Errorf("docker not found in PATH: %w", err)
 	}
 	return &dockerExecutor{
-		cfg:           cfg,
-		logger:        slog.Default(),
-		containers:    make(map[string]string),
-		sessionMsgCnt: make(map[string]int),
-		sessionBridge: make(map[string]bool),
+		cfg:            cfg,
+		logger:         slog.Default(),
+		containers:     make(map[string]string),
+		sessionMsgCnt:  make(map[string]int),
+		sessionBridge:  make(map[string]bool),
+		sessionRuntime: make(map[string]runtime.Runtime),
 	}, nil
 }
 
@@ -303,6 +306,7 @@ func (e *dockerExecutor) StartSession(ctx context.Context, req *executor.Request
 	e.mu.Lock()
 	e.containers[req.ID] = containerName
 	e.sessionBridge[req.ID] = bridgeAvailable
+	e.sessionRuntime[req.ID] = e.getRuntime(req.Runtime)
 	e.mu.Unlock()
 
 	e.logger.Info("session container started", "name", containerName, "container_id", containerID[:12])
@@ -323,37 +327,42 @@ func (e *dockerExecutor) StartSession(ctx context.Context, req *executor.Request
 	return containerID, nil
 }
 
-// SendMessage executes claude -p in a running session container.
+// SendMessage executes the agent CLI in a running session container.
 func (e *dockerExecutor) SendMessage(ctx context.Context, id string, message string) (string, error) {
 	e.mu.Lock()
 	containerName, ok := e.containers[id]
 	msgCnt := e.sessionMsgCnt[id]
 	e.sessionMsgCnt[id] = msgCnt + 1
+	rt := e.sessionRuntime[id]
 	e.mu.Unlock()
 
 	if !ok {
 		containerName = fmt.Sprintf("abox-%s", id)
 	}
+	if rt == nil {
+		rt = runtime.Default()
+	}
 
-	// Build claude args: first message is plain, subsequent use --continue
-	claudeArgs := []string{"exec",
+	// Build docker exec args with runtime CLI args
+	dockerArgs := []string{"exec",
 		"-u", "agent",
 		"-w", "/workspace",
 		"-e", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
 		"-e", "PATH=/home/agent/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		containerName,
-		"claude", "-p", "--dangerously-skip-permissions",
 	}
-	if msgCnt > 0 {
-		claudeArgs = append(claudeArgs, "--continue")
+	cliArgs := rt.BuildExecArgs(message, msgCnt > 0)
+	// For non-streaming SendMessage, remove stream-json flags
+	filtered := make([]string, 0, len(cliArgs))
+	for _, a := range cliArgs {
+		if a == "--output-format" || a == "stream-json" || a == "--verbose" {
+			continue
+		}
+		filtered = append(filtered, a)
 	}
-	// MCP config injection disabled - WebDAV tools are more reliable
-	// if e.sessionBridge[id] {
-	// 	claudeArgs = append(claudeArgs, "--mcp-config", "/tmp/mcp.json")
-	// }
-	claudeArgs = append(claudeArgs, message)
+	dockerArgs = append(dockerArgs, filtered...)
 
-	cmd := exec.CommandContext(ctx, "docker", claudeArgs...)
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	if e.cfg.Host != "" {
 		cmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
 	}
@@ -362,7 +371,7 @@ func (e *dockerExecutor) SendMessage(ctx context.Context, id string, message str
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	e.logger.Info("sending message to session", "container", containerName)
+	e.logger.Info("sending message to session", "container", containerName, "runtime", rt.Name())
 
 	if err := cmd.Run(); err != nil {
 		output := stdout.String()
@@ -405,6 +414,7 @@ func (e *dockerExecutor) StopSession(ctx context.Context, id string) error {
 	delete(e.containers, id)
 	delete(e.sessionMsgCnt, id)
 	delete(e.sessionBridge, id)
+	delete(e.sessionRuntime, id)
 	e.mu.Unlock()
 
 	return err
@@ -415,31 +425,26 @@ func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, messa
 	containerName, ok := e.containers[id]
 	msgCnt := e.sessionMsgCnt[id]
 	e.sessionMsgCnt[id] = msgCnt + 1
+	rt := e.sessionRuntime[id]
 	e.mu.Unlock()
 
 	if !ok {
 		containerName = fmt.Sprintf("abox-%s", id)
 	}
+	if rt == nil {
+		rt = runtime.Default()
+	}
 
-	claudeArgs := []string{"exec",
+	dockerArgs := []string{"exec",
 		"-u", "agent",
 		"-w", "/workspace",
 		"-e", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1",
 		"-e", "PATH=/home/agent/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		containerName,
-		"claude", "-p", "--dangerously-skip-permissions",
-		"--output-format", "stream-json", "--verbose",
 	}
-	if msgCnt > 0 {
-		claudeArgs = append(claudeArgs, "--continue")
-	}
-	// MCP config injection disabled - WebDAV tools are more reliable
-	// if e.sessionBridge[id] {
-	// 	claudeArgs = append(claudeArgs, "--mcp-config", "/tmp/mcp.json")
-	// }
-	claudeArgs = append(claudeArgs, message)
+	dockerArgs = append(dockerArgs, rt.BuildExecArgs(message, msgCnt > 0)...)
 
-	cmd := exec.CommandContext(ctx, "docker", claudeArgs...)
+	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	if e.cfg.Host != "" {
 		cmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
 	}
@@ -449,7 +454,7 @@ func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, messa
 		return "", fmt.Errorf("stdout pipe: %w", err)
 	}
 
-	e.logger.Info("streaming message to session", "container", containerName)
+	e.logger.Info("streaming message to session", "container", containerName, "runtime", rt.Name())
 
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("docker exec start: %w", err)
@@ -465,45 +470,31 @@ func (e *dockerExecutor) SendMessageStream(ctx context.Context, id string, messa
 			continue
 		}
 
-		var event struct {
-			Type    string `json:"type"`
-			Message struct {
-				Content []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"content"`
-			} `json:"message"`
-			Result string `json:"result"`
-		}
-
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
+		token, result, done := rt.ParseStreamLine(line)
+		if done && result != "" && fullResponse.Len() == 0 {
+			fullResponse.WriteString(result)
 			continue
 		}
-
-		switch event.Type {
-		case "assistant":
-			// Claude Code 2.1.61 stream-json format
-			for _, c := range event.Message.Content {
-				if c.Type == "text" && c.Text != "" {
-					text := c.Text
-					// Extract new tokens by comparing with what we have
-					existing := fullResponse.String()
-					if len(text) > len(existing) {
-						token := text[len(existing):]
-						fullResponse.Reset()
-						fullResponse.WriteString(text)
-						if onToken != nil {
-							onToken(token)
-						}
-					} else if text != existing {
-						fullResponse.Reset()
-						fullResponse.WriteString(text)
+		if token != "" {
+			// For claude runtime, token is the full text so far (diff needed)
+			if rt.Name() == "claude" {
+				existing := fullResponse.String()
+				if len(token) > len(existing) {
+					delta := token[len(existing):]
+					fullResponse.Reset()
+					fullResponse.WriteString(token)
+					if onToken != nil {
+						onToken(delta)
 					}
+				} else if token != existing {
+					fullResponse.Reset()
+					fullResponse.WriteString(token)
 				}
-			}
-		case "result":
-			if event.Result != "" && fullResponse.Len() == 0 {
-				fullResponse.WriteString(event.Result)
+			} else {
+				fullResponse.WriteString(token)
+				if onToken != nil {
+					onToken(token)
+				}
 			}
 		}
 	}
@@ -535,4 +526,98 @@ func (e *dockerExecutor) RecoverSessions(ctx context.Context) ([]string, error) 
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+// getRuntime returns the runtime for the given name, falling back to default.
+func (e *dockerExecutor) getRuntime(name string) runtime.Runtime {
+	if name == "" {
+		return runtime.Default()
+	}
+	if rt := runtime.Get(name); rt != nil {
+		return rt
+	}
+	return runtime.Default()
+}
+
+// UploadFile copies a file into a running session container at /workspace/uploads/.
+func (e *dockerExecutor) UploadFile(ctx context.Context, id string, filename string, data []byte) error {
+	e.mu.Lock()
+	containerName, ok := e.containers[id]
+	e.mu.Unlock()
+
+	if !ok {
+		containerName = fmt.Sprintf("abox-%s", id)
+	}
+
+	// Create tar archive with the file under uploads/
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "uploads/" + filename,
+		Mode: 0644,
+		Size: int64(len(data)),
+	}); err != nil {
+		return fmt.Errorf("tar header: %w", err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("tar write: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("tar close: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "cp", "-", containerName+":/workspace/")
+	if e.cfg.Host != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
+	}
+	cmd.Stdin = &buf
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker cp: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	e.logger.Info("uploaded file to session", "container", containerName, "file", filename, "size", len(data))
+	return nil
+}
+
+// StreamLogs streams container logs line by line via a channel.
+func (e *dockerExecutor) StreamLogs(ctx context.Context, id string) (<-chan string, error) {
+	e.mu.Lock()
+	containerName, ok := e.containers[id]
+	e.mu.Unlock()
+
+	if !ok {
+		containerName = fmt.Sprintf("abox-%s", id)
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "logs", "-f", "--tail", "100", containerName)
+	if e.cfg.Host != "" {
+		cmd.Env = append(os.Environ(), "DOCKER_HOST="+e.cfg.Host)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	cmd.Stderr = cmd.Stdout // merge stderr into stdout
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("docker logs start: %w", err)
+	}
+
+	ch := make(chan string, 64)
+	go func() {
+		defer close(ch)
+		defer cmd.Wait()
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 64*1024), 64*1024)
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- scanner.Text():
+			}
+		}
+	}()
+
+	return ch, nil
 }

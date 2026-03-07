@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -32,6 +33,9 @@ import (
 
 	// register channel implementations
 	_ "go.zoe.im/agentbox/internal/channel/telegram"
+
+	// register runtime implementations
+	_ "go.zoe.im/agentbox/internal/runtime"
 )
 
 // Context keys for API provider headers.
@@ -158,6 +162,12 @@ func New(cfg *config.Config) (*Service, error) {
 
 	// Register SSE streaming endpoint (raw HTTP, not via talk)
 	mux.HandleFunc("POST /api/v1/stream", svc.StreamSessionMessage)
+
+	// Register file upload endpoint (multipart, not via talk)
+	mux.HandleFunc("POST /api/v1/upload", svc.HandleUpload)
+
+	// Register log streaming endpoint (SSE, not via talk)
+	mux.HandleFunc("GET /api/v1/logs/{id}", svc.HandleStreamLogs)
 
 	// Initialize channel router if channels are configured.
 	if len(cfg.Channels) > 0 {
@@ -344,6 +354,7 @@ func (s *Service) DeleteRun(ctx context.Context, id string) error {
 type CreateSessionRequest struct {
 	Name      string          `json:"name"`
 	AgentFile string          `json:"agent_file"`
+	Runtime   string          `json:"runtime"`
 	Config    model.RunConfig `json:"config"`
 }
 
@@ -357,6 +368,7 @@ func (s *Service) CreateSession(ctx context.Context, req *CreateSessionRequest) 
 		ID:        shortID(),
 		Name:      req.Name,
 		Mode:      model.RunModeSession,
+		Runtime:   req.Runtime,
 		AgentFile: req.AgentFile,
 		Config:    req.Config,
 	}
@@ -508,7 +520,86 @@ func (s *Service) StreamSessionMessage(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 }
 
-// --- Auth endpoints ---
+// HandleUpload handles file uploads to a running session container.
+func (s *Service) HandleUpload(w http.ResponseWriter, r *http.Request) {
+	// Auth check
+	if s.auth != nil {
+		user := auth.UserFromContext(r.Context())
+		if user == nil {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+	}
+
+	sessionID := r.FormValue("session_id")
+	if sessionID == "" {
+		http.Error(w, `{"error":"session_id required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Max 50MB
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
+		http.Error(w, `{"error":"invalid multipart form"}`, http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, `{"error":"file required"}`, http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.engine.UploadFile(r.Context(), sessionID, header.Filename, data); err != nil {
+		s.logger.Error("upload file failed", "session", sessionID, "err", err)
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"path": "/workspace/uploads/" + header.Filename,
+		"name": header.Filename,
+		"size": fmt.Sprintf("%d", len(data)),
+	})
+}
+
+// HandleStreamLogs streams container logs via SSE.
+func (s *Service) HandleStreamLogs(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	ctx := r.Context()
+	logCh, err := s.engine.StreamLogs(ctx, id)
+	if err != nil {
+		data, _ := json.Marshal(map[string]string{"error": err.Error()})
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+		return
+	}
+
+	for line := range logCh {
+		data, _ := json.Marshal(map[string]string{"log": line})
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+}
 
 type RegisterRequest struct {
 	Email    string `json:"email"`
