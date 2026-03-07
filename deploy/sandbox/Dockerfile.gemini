@@ -1,0 +1,9 @@
+FROM node:22-alpine
+RUN apk add --no-cache curl git jq bash
+RUN npm i -g @google/gemini-cli && npm cache clean --force
+RUN adduser -D -s /bin/bash agent && mkdir -p /workspace/output && chown -R agent:agent /workspace
+COPY entrypoint.sh /opt/agentbox/entrypoint.sh
+RUN chmod +x /opt/agentbox/entrypoint.sh
+USER agent
+WORKDIR /workspace
+ENTRYPOINT ["/opt/agentbox/entrypoint.sh"]

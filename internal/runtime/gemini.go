@@ -1,7 +1,5 @@
 package runtime
 
-import "encoding/json"
-
 func init() {
 	Register("gemini", &GeminiCLI{})
 }
@@ -13,21 +11,16 @@ func (c *GeminiCLI) Name() string  { return "gemini" }
 func (c *GeminiCLI) Image() string { return "agentbox-sandbox:gemini" }
 
 func (c *GeminiCLI) BuildExecArgs(message string, continued bool) []string {
-	args := []string{"gemini", "-p", message}
-	return args
+	return []string{"gemini", "-p", message}
 }
 
 func (c *GeminiCLI) ParseStreamLine(line string) (string, string, bool) {
-	// Skeleton: parse gemini CLI output when format is documented
-	var event struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal([]byte(line), &event); err != nil {
+	// Gemini CLI in -p mode outputs plain text to stdout.
+	if line == "" {
 		return "", "", false
 	}
-	if event.Text != "" {
-		return event.Text, "", false
-	}
-	return "", "", false
+	return line + "\n", "", false
 }
+
+func (c *GeminiCLI) EnvKeys() []string       { return []string{"GEMINI_API_KEY"} }
+func (c *GeminiCLI) SetupCommands() []string { return nil }

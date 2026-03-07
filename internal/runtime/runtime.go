@@ -8,6 +8,8 @@ type Runtime interface {
 	Image() string
 	BuildExecArgs(message string, continued bool) []string
 	ParseStreamLine(line string) (token string, result string, done bool)
+	EnvKeys() []string       // required env var names (e.g. ["ANTHROPIC_API_KEY"])
+	SetupCommands() []string // commands to run on first exec (e.g. pip install)
 }
 
 var (

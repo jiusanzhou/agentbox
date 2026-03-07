@@ -24,6 +24,9 @@ func (c *ClaudeCode) BuildExecArgs(message string, continued bool) []string {
 	return args
 }
 
+func (c *ClaudeCode) EnvKeys() []string       { return []string{"ANTHROPIC_API_KEY"} }
+func (c *ClaudeCode) SetupCommands() []string { return nil }
+
 func (c *ClaudeCode) ParseStreamLine(line string) (string, string, bool) {
 	var event struct {
 		Type    string `json:"type"`

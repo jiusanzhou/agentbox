@@ -19,6 +19,7 @@ import (
 	"go.zoe.im/agentbox/internal/executor"
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/agentbox/internal/ratelimit"
+	"go.zoe.im/agentbox/internal/runtime"
 	"go.zoe.im/agentbox/internal/storage"
 	"go.zoe.im/agentbox/internal/store"
 	"go.zoe.im/agentbox/internal/tunnel"
@@ -378,7 +379,14 @@ func (s *Service) CreateSession(ctx context.Context, req *CreateSessionRequest) 
 		if run.Config.Env == nil {
 			run.Config.Env = make(map[string]string)
 		}
-		run.Config.Env["ANTHROPIC_API_KEY"] = apiKey
+		// Use runtime's EnvKeys for dynamic API key mapping
+		rt := runtime.Get(req.Runtime)
+		if rt == nil {
+			rt = runtime.Default()
+		}
+		for _, key := range rt.EnvKeys() {
+			run.Config.Env[key] = apiKey
+		}
 	}
 	if baseURL := BaseURLFromContext(ctx); baseURL != "" {
 		if run.Config.Env == nil {
