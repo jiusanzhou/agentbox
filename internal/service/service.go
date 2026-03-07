@@ -161,12 +161,16 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	// Register talk endpoints on the shared mux
-	s.server.Serve(ctx)
+	// Note: with external mux, Serve() blocks on <-ctx.Done(), so run in goroutine
+	go s.server.Serve(ctx)
 
-	// The talk server with external mux just registered endpoints and returned.
-	// Now start our own HTTP server with the shared mux.
+	// Start HTTP server with the shared mux
 	s.logger.Info("starting agentbox", "addr", s.cfg.Addr)
-	httpSrv := &http.Server{Addr: s.cfg.Addr, Handler: s.mux}
+	var handler http.Handler = s.mux
+	if s.auth != nil {
+		handler = s.auth.Middleware(handler)
+	}
+	httpSrv := &http.Server{Addr: s.cfg.Addr, Handler: handler}
 	go func() {
 		<-ctx.Done()
 		httpSrv.Shutdown(context.Background())
