@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"go.zoe.im/agentbox/internal/browser"
 	davserver "go.zoe.im/agentbox/internal/bridge/webdav"
 	"go.zoe.im/agentbox/internal/tunnel"
 
@@ -15,9 +16,11 @@ import (
 )
 
 var (
-	clientServer string
-	clientToken  string
-	clientRoots  string
+	clientServer    string
+	clientToken     string
+	clientRoots     string
+	clientBrowser   bool
+	clientChromeURL string
 )
 
 var clientCmd = cli.New(
@@ -30,6 +33,8 @@ func init() {
 	clientCmd.Flags().StringVarP(&clientServer, "server", "s", "", "ABox server URL (default: AGENTBOX_SERVER or http://localhost:8080)")
 	clientCmd.Flags().StringVarP(&clientToken, "token", "t", "", "Auth token or API key")
 	clientCmd.Flags().StringVarP(&clientRoots, "roots", "r", "", "Comma-separated directories to expose")
+	clientCmd.Flags().BoolVar(&clientBrowser, "browser", false, "Enable browser capability")
+	clientCmd.Flags().StringVar(&clientChromeURL, "chrome-url", "", "Chrome DevTools URL (default: auto-detect or launch)")
 }
 
 func runClient(cmd *cli.Command, args ...string) {
@@ -60,6 +65,22 @@ func runClient(cmd *cli.Command, args ...string) {
 		}
 	}
 
+	// Register browser provider if enabled
+	if clientBrowser {
+		cfg := browser.Config{
+			RemoteURL: clientChromeURL,
+			Headless:  false,
+		}
+		b, err := browser.New(cfg, logger)
+		if err != nil {
+			logger.Error("failed to start browser provider", "err", err)
+		} else {
+			client.AddProvider("browser", b.Handler())
+			logger.Info("browser provider registered")
+			defer b.Close()
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -77,6 +98,9 @@ func runClient(cmd *cli.Command, args ...string) {
 		for i, r := range parseRootDirs(clientRoots) {
 			fmt.Printf("    \033[33m/webdav/r%d/\033[0m -> %s\n", i, r)
 		}
+	}
+	if clientBrowser {
+		fmt.Printf("    \033[33m/browser/\033[0m -> Chrome CDP\n")
 	}
 	fmt.Println()
 
