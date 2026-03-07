@@ -29,6 +29,7 @@ import (
 
 	// register default implementations
 	_ "go.zoe.im/agentbox/internal/executor/docker"
+	_ "go.zoe.im/agentbox/internal/executor/e2b"
 	_ "go.zoe.im/agentbox/internal/executor/local"
 	_ "go.zoe.im/agentbox/internal/storage/local"
 	_ "go.zoe.im/agentbox/internal/store/memory"
