@@ -170,7 +170,16 @@ func (e *Engine) SendMessage(ctx context.Context, runID string, message string) 
 		return "", fmt.Errorf("session %s is not running (status: %s)", runID, run.Status)
 	}
 
-	return e.executor.SendMessage(ctx, runID, message)
+	resp, err := e.executor.SendMessage(ctx, runID, message)
+	if err != nil {
+		return "", err
+	}
+
+	now := time.Now()
+	run.LastActivityAt = &now
+	_ = e.store.UpdateRun(ctx, run)
+
+	return resp, nil
 }
 
 // StopSession stops a running session container.
@@ -208,7 +217,57 @@ func (e *Engine) SendMessageStream(ctx context.Context, runID string, message st
 	if run.Status != model.RunStatusRunning {
 		return "", fmt.Errorf("session %s is not running (status: %s)", runID, run.Status)
 	}
-	return e.executor.SendMessageStream(ctx, runID, message, onToken)
+	resp, err := e.executor.SendMessageStream(ctx, runID, message, onToken)
+	if err != nil {
+		return "", err
+	}
+
+	now := time.Now()
+	run.LastActivityAt = &now
+	_ = e.store.UpdateRun(ctx, run)
+
+	return resp, nil
+}
+
+// StartCleanup periodically removes expired sessions.
+func (e *Engine) StartCleanup(ctx context.Context, ttl, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			e.cleanupExpiredSessions(ctx, ttl)
+		}
+	}
+}
+
+func (e *Engine) cleanupExpiredSessions(ctx context.Context, ttl time.Duration) {
+	runs, err := e.store.ListRuns(ctx, 1000, 0)
+	if err != nil {
+		e.logger.Error("cleanup: list runs failed", "err", err)
+		return
+	}
+
+	now := time.Now()
+	for _, run := range runs {
+		if run.Mode != model.RunModeSession || run.Status != model.RunStatusRunning {
+			continue
+		}
+		if run.StartedAt == nil {
+			continue
+		}
+		lastActive := run.StartedAt
+		if run.LastActivityAt != nil {
+			lastActive = run.LastActivityAt
+		}
+		if now.Sub(*lastActive) > ttl {
+			e.logger.Info("cleaning up expired session", "id", run.ID, "age", now.Sub(*lastActive))
+			_ = e.StopSession(ctx, run.ID)
+		}
+	}
 }
 
 // RecoverSessions scans for running containers/pods and reconciles with the store.

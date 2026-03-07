@@ -32,9 +32,10 @@ type Run struct {
 	AgentFile string     `json:"agent_file"`
 	Config    RunConfig  `json:"config"`
 	Result    *Result    `json:"result,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	StartedAt *time.Time `json:"started_at,omitempty"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	EndedAt        *time.Time `json:"ended_at,omitempty"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 }
 
 // Message represents a chat message in a session.

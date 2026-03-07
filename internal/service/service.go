@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.zoe.im/agentbox/internal/auth"
 	"go.zoe.im/agentbox/internal/channel"
@@ -16,6 +17,7 @@ import (
 	"go.zoe.im/agentbox/internal/engine"
 	"go.zoe.im/agentbox/internal/executor"
 	"go.zoe.im/agentbox/internal/model"
+	"go.zoe.im/agentbox/internal/ratelimit"
 	"go.zoe.im/agentbox/internal/storage"
 	"go.zoe.im/agentbox/internal/store"
 	"go.zoe.im/agentbox/internal/tunnel"
@@ -211,6 +213,44 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.auth != nil {
 		handler = s.auth.Middleware(handler)
 	}
+
+	// Rate limiting middleware
+	limiter := ratelimit.New(s.cfg.RateLimit)
+	handler = limiter.Middleware(func(r *http.Request) string {
+		if user := auth.UserFromContext(r.Context()); user != nil {
+			return user.ID
+		}
+		return ""
+	})(handler)
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				limiter.Cleanup(30 * time.Minute)
+			}
+		}
+	}()
+
+	// Session TTL cleanup
+	ttl := time.Hour
+	if s.cfg.SessionTTL != "" {
+		if d, err := time.ParseDuration(s.cfg.SessionTTL); err == nil {
+			ttl = d
+		}
+	}
+	cleanupInterval := 5 * time.Minute
+	if s.cfg.CleanupInterval != "" {
+		if d, err := time.ParseDuration(s.cfg.CleanupInterval); err == nil {
+			cleanupInterval = d
+		}
+	}
+	go s.engine.StartCleanup(ctx, ttl, cleanupInterval)
+	s.logger.Info("session cleanup started", "ttl", ttl, "interval", cleanupInterval)
+
 	// Middleware to extract API provider headers into context
 	handler = apiHeaderMiddleware(handler)
 	httpSrv := &http.Server{Addr: s.cfg.Addr, Handler: handler}

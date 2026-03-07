@@ -49,7 +49,7 @@ HELPER
         cat > /home/agent/bin/browser-screenshot << 'HELPER'
 #!/bin/bash
 OUT="${1:-/workspace/screenshot.png}"
-curl -s -X POST "${ABOX_TUNNEL_URL}/browser/screenshot" -H "Content-Type: application/json" -d '{}' | python3 -c "import json,sys,base64; d=json.load(sys.stdin); open('$OUT','wb').write(base64.b64decode(d.get('image','')))" 2>/dev/null && echo "Screenshot: $OUT"
+curl -s -X POST "${ABOX_TUNNEL_URL}/browser/screenshot" -H "Content-Type: application/json" -d '{}' | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));require('fs').writeFileSync('$OUT',Buffer.from(d.image||'','base64'))" 2>/dev/null && echo "Screenshot: $OUT"
 HELPER
         cat > /home/agent/bin/browser-content << 'HELPER'
 #!/bin/bash

@@ -1,20 +1,19 @@
-FROM node:22-slim
+FROM node:22-alpine
 
-RUN apt-get update && apt-get install -y \
-    git curl jq python3 python3-pip bash \
-    && rm -rf /var/lib/apt/lists/*
+# System deps (minimal)
+RUN apk add --no-cache curl git jq bash
 
-# Install Claude Code (pin version to match local)
-RUN npm i -g @anthropic-ai/claude-code@2.1.61
+# Install claude-code globally
+RUN npm i -g @anthropic-ai/claude-code@2.1.61 && npm cache clean --force
 
-# Create non-root user
-RUN useradd -m -s /bin/bash agent
-RUN mkdir -p /workspace/output && chown -R agent:agent /workspace
+# Setup user and workspace
+RUN adduser -D -s /bin/bash agent && \
+    mkdir -p /workspace/output && \
+    chown -R agent:agent /workspace
 
 COPY entrypoint.sh /opt/agentbox/entrypoint.sh
 RUN chmod +x /opt/agentbox/entrypoint.sh
 
 USER agent
 WORKDIR /workspace
-
 ENTRYPOINT ["/opt/agentbox/entrypoint.sh"]

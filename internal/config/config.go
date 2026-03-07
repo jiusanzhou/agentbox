@@ -37,6 +37,19 @@ type Config struct {
 
 	// Tunnel proxy address for sandbox containers
 	TunnelProxyAddr string `json:"tunnel_proxy_addr,omitempty" yaml:"tunnel_proxy_addr" opts:"env=ABOX_TUNNEL_PROXY_ADDR"`
+
+	// Session TTL: auto-cleanup idle sessions (e.g. "30m", "1h")
+	SessionTTL      string `json:"session_ttl,omitempty" yaml:"session_ttl"`
+	CleanupInterval string `json:"cleanup_interval,omitempty" yaml:"cleanup_interval"`
+
+	// Rate limiting
+	RateLimit RateLimitConfig `json:"rate_limit,omitempty" yaml:"rate_limit"`
+}
+
+// RateLimitConfig holds rate limiting settings.
+type RateLimitConfig struct {
+	RequestsPerMinute int `json:"requests_per_minute,omitempty" yaml:"requests_per_minute"`
+	BurstSize         int `json:"burst_size,omitempty" yaml:"burst_size"`
 }
 
 func (c *Config) String() string {
