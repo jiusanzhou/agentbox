@@ -16,6 +16,7 @@ Agentbox supports multiple agent CLI runtimes. Each runtime wraps a different co
 | `openhands` | local | `openhands -t` | N/A | plain text | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` |
 | `custom` | local | user script | N/A | plain text | — |
 | `http` | remote | curl to endpoint | N/A | JSON | `ABOX_HTTP_ENDPOINT` |
+| `openclaw` | remote | curl to OpenClaw Gateway | N/A | SSE (OpenAI Chat Completions) | `OPENCLAW_GATEWAY_URL`, `OPENCLAW_GATEWAY_TOKEN`, `OPENCLAW_AGENT_ID` |
 
 ## Interface
 
@@ -58,6 +59,13 @@ Uses `opencode --non-interactive --message`. OpenCode was renamed to Crush by th
 ### HTTP Adapter
 
 For external agents exposing an HTTP API (e.g. OpenClaw). Calls `$ABOX_HTTP_ENDPOINT` with a JSON payload via curl. Set `ABOX_HTTP_TOKEN` for bearer auth.
+
+### OpenClaw
+
+Calls OpenClaw Gateway's OpenAI-compatible Chat Completions API (`POST /v1/chat/completions`) via curl. Streams responses using SSE format. Configure with:
+- `OPENCLAW_GATEWAY_URL` — gateway base URL (e.g. `https://gateway.openclaw.dev`)
+- `OPENCLAW_GATEWAY_TOKEN` — bearer token for authentication
+- `OPENCLAW_AGENT_ID` — agent identifier (defaults to `main`)
 
 ## Adding a New Runtime
 

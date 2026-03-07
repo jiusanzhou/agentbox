@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -31,7 +32,7 @@ func TestRuntime_Registry(t *testing.T) {
 	assert(t, d.Name() == "claude", "default should be claude")
 
 	// All registered runtimes
-	names := []string{"claude", "codex", "gemini", "aider", "goose", "openhands", "cursor", "opencode", "custom", "http"}
+	names := []string{"claude", "codex", "gemini", "aider", "goose", "openhands", "cursor", "opencode", "custom", "http", "openclaw"}
 	for _, name := range names {
 		rt := Get(name)
 		assert(t, rt != nil, "missing runtime: "+name)
@@ -50,7 +51,7 @@ func TestRuntime_Registry(t *testing.T) {
 
 func TestRuntime_List(t *testing.T) {
 	list := List()
-	assert(t, len(list) >= 10, "should have at least 10 runtimes")
+	assert(t, len(list) >= 11, "should have at least 11 runtimes")
 
 	found := map[string]bool{}
 	for _, info := range list {
@@ -197,4 +198,65 @@ func searchStr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestRuntime_OpenClawBuildArgs(t *testing.T) {
+	rt := Get("openclaw")
+	assert(t, rt != nil, "openclaw runtime not found")
+	args := rt.BuildExecArgs("hello", false)
+	assert(t, len(args) == 3, "should be sh -c 'curl ...'")
+	assert(t, args[0] == "sh", "first arg should be sh")
+	assert(t, strings.Contains(args[2], "OPENCLAW_GATEWAY_URL"), "should reference gateway URL env")
+	assert(t, strings.Contains(args[2], "chat/completions"), "should call chat/completions endpoint")
+}
+
+func TestRuntime_OpenClawParseStreamLine(t *testing.T) {
+	rt := Get("openclaw")
+	assert(t, rt != nil, "openclaw runtime not found")
+
+	// SSE delta
+	token, _, done := rt.ParseStreamLine(`data: {"choices":[{"delta":{"content":"Hi"}}]}`)
+	assert(t, token == "Hi", "should parse delta content")
+	assert(t, !done, "delta should not be done")
+
+	// SSE done
+	_, _, done = rt.ParseStreamLine("data: [DONE]")
+	assert(t, done, "DONE marker should be done")
+
+	// Non-streaming full response
+	_, result, done := rt.ParseStreamLine(`data: {"choices":[{"message":{"content":"Full response"}}]}`)
+	assert(t, result == "Full response", "should parse full message content")
+	assert(t, done, "full message should be done")
+
+	// Empty line
+	token, _, done = rt.ParseStreamLine("")
+	assert(t, token == "", "empty line should return empty token")
+	assert(t, !done, "empty line should not be done")
+
+	// Non-data line
+	token, _, done = rt.ParseStreamLine("event: message")
+	assert(t, token == "", "non-data line should return empty token")
+	assert(t, !done, "non-data line should not be done")
+
+	// finish_reason stop
+	_, _, done = rt.ParseStreamLine(`data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}`)
+	assert(t, done, "finish_reason stop should be done")
+}
+
+func TestRuntime_OpenClawEnvKeys(t *testing.T) {
+	rt := Get("openclaw")
+	assert(t, rt != nil, "openclaw runtime not found")
+	keys := rt.EnvKeys()
+	assert(t, len(keys) == 3, "should have 3 env keys")
+	assert(t, keys[0] == "OPENCLAW_GATEWAY_URL", "first key should be OPENCLAW_GATEWAY_URL")
+	assert(t, keys[1] == "OPENCLAW_GATEWAY_TOKEN", "second key should be OPENCLAW_GATEWAY_TOKEN")
+	assert(t, keys[2] == "OPENCLAW_AGENT_ID", "third key should be OPENCLAW_AGENT_ID")
+}
+
+func TestRuntime_OpenClawSetupCommands(t *testing.T) {
+	rt := Get("openclaw")
+	assert(t, rt != nil, "openclaw runtime not found")
+	cmds := rt.SetupCommands()
+	assert(t, len(cmds) == 1, "should have 1 setup command")
+	assert(t, strings.Contains(cmds[0], "curl"), "setup command should install curl")
 }
