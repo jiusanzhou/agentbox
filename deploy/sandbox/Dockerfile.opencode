@@ -1,0 +1,12 @@
+FROM golang:1.24-alpine AS builder
+RUN go install github.com/opencode-ai/opencode@latest
+
+FROM alpine:3.20
+RUN apk add --no-cache curl git jq bash
+COPY --from=builder /go/bin/opencode /usr/local/bin/opencode
+RUN adduser -D -s /bin/bash agent && mkdir -p /workspace/output && chown -R agent:agent /workspace
+COPY entrypoint.sh /opt/agentbox/entrypoint.sh
+RUN chmod +x /opt/agentbox/entrypoint.sh
+USER agent
+WORKDIR /workspace
+ENTRYPOINT ["/opt/agentbox/entrypoint.sh"]
