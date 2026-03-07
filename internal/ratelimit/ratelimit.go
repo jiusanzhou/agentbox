@@ -36,6 +36,20 @@ func New(cfg config.RateLimitConfig) *Limiter {
 	}
 }
 
+// UpdateConfig applies new rate limit settings immediately.
+func (l *Limiter) UpdateConfig(cfg config.RateLimitConfig) {
+	if cfg.RequestsPerMinute <= 0 {
+		cfg.RequestsPerMinute = 60
+	}
+	if cfg.BurstSize <= 0 {
+		cfg.BurstSize = 10
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.config = cfg
+	l.buckets = make(map[string]*bucket)
+}
+
 // Allow checks whether the given key is allowed to proceed.
 func (l *Limiter) Allow(key string) bool {
 	l.mu.Lock()

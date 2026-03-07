@@ -35,3 +35,25 @@ func Get(name string) Runtime {
 func Default() Runtime {
 	return Get("claude")
 }
+
+// RuntimeInfo describes a registered runtime for API responses.
+type RuntimeInfo struct {
+	Name    string   `json:"name"`
+	Image   string   `json:"image"`
+	EnvKeys []string `json:"env_keys"`
+}
+
+// List returns info about all registered runtimes.
+func List() []RuntimeInfo {
+	mu.RLock()
+	defer mu.RUnlock()
+	var list []RuntimeInfo
+	for _, rt := range registry {
+		list = append(list, RuntimeInfo{
+			Name:    rt.Name(),
+			Image:   rt.Image(),
+			EnvKeys: rt.EnvKeys(),
+		})
+	}
+	return list
+}

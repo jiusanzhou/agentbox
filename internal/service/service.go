@@ -17,6 +17,7 @@ import (
 	"go.zoe.im/agentbox/internal/config"
 	"go.zoe.im/agentbox/internal/engine"
 	"go.zoe.im/agentbox/internal/executor"
+	"go.zoe.im/agentbox/internal/integration"
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/agentbox/internal/ratelimit"
 	"go.zoe.im/agentbox/internal/runtime"
@@ -78,15 +79,19 @@ func ModelFromContext(ctx context.Context) string {
 
 // Service is the main application service.
 type Service struct {
-	cfg     *config.Config
-	engine  *engine.Engine
-	storage storage.Storage
-	server  *talk.Server
-	router  *channel.Router
-	auth    *auth.Auth
-	hub     *tunnel.Hub
-	mux     *http.ServeMux
-	logger  *slog.Logger
+	cfg          *config.Config
+	configPath   string
+	engine       *engine.Engine
+	storage      storage.Storage
+	server       *talk.Server
+	router       *channel.Router
+	integrations *integration.Manager
+	auth         *auth.Auth
+	hub          *tunnel.Hub
+	mux          *http.ServeMux
+	limiter      *ratelimit.Limiter
+	store        store.Store
+	logger       *slog.Logger
 }
 
 func New(cfg *config.Config) (*Service, error) {
@@ -162,6 +167,7 @@ func New(cfg *config.Config) (*Service, error) {
 		auth:    authInst,
 		hub:     hub,
 		mux:     mux,
+		store:   s,
 		logger:  logger,
 	}
 
@@ -194,6 +200,28 @@ func New(cfg *config.Config) (*Service, error) {
 		svc.router = router
 	}
 
+	// Register admin config API endpoints (raw HTTP, not via talk)
+	mux.HandleFunc("GET /api/v1/admin/config", svc.GetConfig)
+	mux.HandleFunc("PUT /api/v1/admin/config", svc.UpdateConfig)
+	mux.HandleFunc("GET /api/v1/admin/config/channels", svc.GetChannels)
+	mux.HandleFunc("POST /api/v1/admin/config/channels", svc.AddChannel)
+	mux.HandleFunc("DELETE /api/v1/admin/config/channels/{index}", svc.RemoveChannel)
+	mux.HandleFunc("GET /api/v1/admin/runtimes", svc.ListRuntimes)
+
+	// Create integration manager for per-user IM channel bindings
+	svc.integrations = integration.NewManager(s, eng, mux, logger)
+
+	// Register integration API endpoints
+	mux.HandleFunc("GET /api/v1/integrations", svc.ListIntegrations)
+	mux.HandleFunc("POST /api/v1/integrations", svc.CreateIntegration)
+	mux.HandleFunc("GET /api/v1/integrations/{id}", svc.GetIntegration)
+	mux.HandleFunc("PUT /api/v1/integrations/{id}", svc.UpdateIntegration)
+	mux.HandleFunc("DELETE /api/v1/integrations/{id}", svc.DeleteIntegration)
+	mux.HandleFunc("POST /api/v1/integrations/{id}/test", svc.TestIntegration)
+
+	// Webhook endpoint for integrations (no auth required — verified by HMAC)
+	mux.HandleFunc("POST /api/v1/hook/{id}", svc.integrations.HandleWebhook)
+
 	// Register endpoints via talk reflection
 	if err := server.Register(svc); err != nil {
 		return nil, fmt.Errorf("register endpoints: %w", err)
@@ -213,6 +241,11 @@ func (s *Service) Start(ctx context.Context) error {
 		if err := s.router.Start(ctx); err != nil {
 			return fmt.Errorf("start channel router: %w", err)
 		}
+	}
+
+	// Start per-user integration channels
+	if err := s.integrations.Start(ctx); err != nil {
+		s.logger.Warn("integration manager start failed", "err", err)
 	}
 
 	// Start tunnel proxy for sandbox containers
@@ -237,8 +270,8 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	// Rate limiting middleware
-	limiter := ratelimit.New(s.cfg.RateLimit)
-	handler = limiter.Middleware(func(r *http.Request) string {
+	s.limiter = ratelimit.New(s.cfg.RateLimit)
+	handler = s.limiter.Middleware(func(r *http.Request) string {
 		if user := auth.UserFromContext(r.Context()); user != nil {
 			return user.ID
 		}
@@ -252,7 +285,7 @@ func (s *Service) Start(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				limiter.Cleanup(30 * time.Minute)
+				s.limiter.Cleanup(30 * time.Minute)
 			}
 		}
 	}()
@@ -304,6 +337,9 @@ func apiHeaderMiddleware(next http.Handler) http.Handler {
 func (s *Service) Shutdown(ctx context.Context) error {
 	if s.router != nil {
 		_ = s.router.Stop(ctx)
+	}
+	if s.integrations != nil {
+		_ = s.integrations.Stop(ctx)
 	}
 	return s.server.Shutdown(ctx)
 }
@@ -456,8 +492,22 @@ func (s *Service) GetHealth(ctx context.Context) (map[string]string, error) {
 // TalkAnnotations controls endpoint extraction.
 func (s *Service) TalkAnnotations() map[string]string {
 	return map[string]string{
-		"Start":    "@talk skip",
-		"Shutdown": "@talk skip",
+		"Start":             "@talk skip",
+		"Shutdown":          "@talk skip",
+		"GetConfig":         "@talk skip",
+		"UpdateConfig":      "@talk skip",
+		"GetChannels":       "@talk skip",
+		"AddChannel":        "@talk skip",
+		"RemoveChannel":     "@talk skip",
+		"ListRuntimes":      "@talk skip",
+		"ReloadChannels":    "@talk skip",
+		"SetConfigPath":     "@talk skip",
+		"ListIntegrations":  "@talk skip",
+		"CreateIntegration": "@talk skip",
+		"GetIntegration":    "@talk skip",
+		"UpdateIntegration": "@talk skip",
+		"DeleteIntegration": "@talk skip",
+		"TestIntegration":   "@talk skip",
 	}
 }
 
@@ -465,6 +515,210 @@ func shortID() string {
 	b := make([]byte, 4)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// --- Integration endpoints (raw HTTP, not via talk) ---
+
+// ListIntegrations handles GET /api/v1/integrations
+func (s *Service) ListIntegrations(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	list, err := s.store.ListIntegrations(r.Context(), user.ID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	if list == nil {
+		list = []*model.Integration{}
+	}
+
+	// Mask secrets in config
+	for _, intg := range list {
+		intg.Config = maskConfig(intg.Type, intg.Config)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
+}
+
+// CreateIntegration handles POST /api/v1/integrations
+func (s *Service) CreateIntegration(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Type      string          `json:"type"`
+		Name      string          `json:"name"`
+		Config    json.RawMessage `json:"config"`
+		SessionID string          `json:"session_id"`
+		Enabled   bool            `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Type == "" {
+		http.Error(w, `{"error":"type is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	intg := &model.Integration{
+		UserID:    user.ID,
+		Type:      req.Type,
+		Name:      req.Name,
+		Config:    req.Config,
+		SessionID: req.SessionID,
+		Enabled:   req.Enabled,
+	}
+
+	if err := s.integrations.AddIntegration(r.Context(), intg); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(intg)
+}
+
+// GetIntegration handles GET /api/v1/integrations/{id}
+func (s *Service) GetIntegration(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	intg, err := s.store.GetIntegration(r.Context(), r.PathValue("id"))
+	if err != nil {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+	if intg.UserID != user.ID {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+
+	intg.Config = maskConfig(intg.Type, intg.Config)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(intg)
+}
+
+// UpdateIntegration handles PUT /api/v1/integrations/{id}
+func (s *Service) UpdateIntegration(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	intg, err := s.store.GetIntegration(r.Context(), r.PathValue("id"))
+	if err != nil || intg.UserID != user.ID {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Name      *string          `json:"name"`
+		Config    *json.RawMessage `json:"config"`
+		SessionID *string          `json:"session_id"`
+		Enabled   *bool            `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Name != nil {
+		intg.Name = *req.Name
+	}
+	if req.Config != nil {
+		intg.Config = *req.Config
+	}
+	if req.SessionID != nil {
+		intg.SessionID = *req.SessionID
+	}
+	if req.Enabled != nil {
+		intg.Enabled = *req.Enabled
+	}
+
+	if err := s.integrations.UpdateIntegration(r.Context(), intg); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(intg)
+}
+
+// DeleteIntegration handles DELETE /api/v1/integrations/{id}
+func (s *Service) DeleteIntegration(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	intg, err := s.store.GetIntegration(r.Context(), r.PathValue("id"))
+	if err != nil || intg.UserID != user.ID {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+
+	if err := s.integrations.RemoveIntegration(r.Context(), intg.ID); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// TestIntegration handles POST /api/v1/integrations/{id}/test
+func (s *Service) TestIntegration(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	intg, err := s.store.GetIntegration(r.Context(), r.PathValue("id"))
+	if err != nil || intg.UserID != user.ID {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+
+	if err := s.integrations.TestIntegration(r.Context(), intg); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// maskConfig masks sensitive fields in integration config for API responses.
+func maskConfig(typ string, raw json.RawMessage) json.RawMessage {
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	secretKeys := []string{"bot_token", "token", "secret", "app_token", "encoding_aes_key"}
+	for _, key := range secretKeys {
+		if v, ok := m[key].(string); ok && len(v) > 8 {
+			m[key] = v[:4] + "****" + v[len(v)-4:]
+		}
+	}
+	masked, _ := json.Marshal(m)
+	return masked
 }
 
 

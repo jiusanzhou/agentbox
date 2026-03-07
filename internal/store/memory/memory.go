@@ -17,15 +17,17 @@ func init() {
 }
 
 type memoryStore struct {
-	mu    sync.RWMutex
-	runs  map[string]*model.Run
-	users map[string]*model.User
+	mu           sync.RWMutex
+	runs         map[string]*model.Run
+	users        map[string]*model.User
+	integrations map[string]*model.Integration
 }
 
 func New() store.Store {
 	return &memoryStore{
-		runs:  make(map[string]*model.Run),
-		users: make(map[string]*model.User),
+		runs:         make(map[string]*model.Run),
+		users:        make(map[string]*model.User),
+		integrations: make(map[string]*model.Integration),
 	}
 }
 
@@ -138,4 +140,64 @@ func (s *memoryStore) UpdateUser(_ context.Context, user *model.User) error {
 	}
 	s.users[user.ID] = user
 	return nil
+}
+
+// --- Integration methods ---
+
+func (s *memoryStore) CreateIntegration(_ context.Context, i *model.Integration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.integrations[i.ID] = i
+	return nil
+}
+
+func (s *memoryStore) GetIntegration(_ context.Context, id string) (*model.Integration, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	i, ok := s.integrations[id]
+	if !ok {
+		return nil, fmt.Errorf("integration %s not found", id)
+	}
+	return i, nil
+}
+
+func (s *memoryStore) ListIntegrations(_ context.Context, userID string) ([]*model.Integration, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*model.Integration
+	for _, i := range s.integrations {
+		if i.UserID == userID {
+			result = append(result, i)
+		}
+	}
+	return result, nil
+}
+
+func (s *memoryStore) UpdateIntegration(_ context.Context, i *model.Integration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.integrations[i.ID]; !exists {
+		return fmt.Errorf("integration %s not found", i.ID)
+	}
+	s.integrations[i.ID] = i
+	return nil
+}
+
+func (s *memoryStore) DeleteIntegration(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.integrations, id)
+	return nil
+}
+
+func (s *memoryStore) ListAllEnabledIntegrations(_ context.Context) ([]*model.Integration, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*model.Integration
+	for _, i := range s.integrations {
+		if i.Enabled {
+			result = append(result, i)
+		}
+	}
+	return result, nil
 }

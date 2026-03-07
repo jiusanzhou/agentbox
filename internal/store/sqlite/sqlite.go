@@ -99,7 +99,25 @@ func migrate(db *sql.DB) error {
 	// Add user_id column to existing runs table (ignore error if already exists).
 	db.Exec("ALTER TABLE runs ADD COLUMN user_id TEXT DEFAULT ''")
 
-	return nil
+	// Integrations table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS integrations (
+			id         TEXT PRIMARY KEY,
+			user_id    TEXT NOT NULL,
+			type       TEXT NOT NULL,
+			name       TEXT NOT NULL DEFAULT '',
+			config     TEXT NOT NULL DEFAULT '{}',
+			session_id TEXT DEFAULT '',
+			enabled    INTEGER NOT NULL DEFAULT 1,
+			status     TEXT NOT NULL DEFAULT 'disconnected',
+			error      TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_integrations_user ON integrations(user_id);
+	`)
+
+	return err
 }
 
 func (s *sqliteStore) CreateRun(ctx context.Context, run *model.Run) error {
@@ -305,3 +323,91 @@ func scanUser(row scannable) (*model.User, error) {
 // unused but ensures compile-time check
 var _ store.Store = (*sqliteStore)(nil)
 var _ interface{ Close(context.Context) error } = (*sqliteStore)(nil)
+
+// --- Integration methods ---
+
+func (s *sqliteStore) CreateIntegration(ctx context.Context, i *model.Integration) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO integrations (id, user_id, type, name, config, session_id, enabled, status, error, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		i.ID, i.UserID, i.Type, i.Name, string(i.Config), i.SessionID,
+		i.Enabled, i.Status, i.Error, i.CreatedAt, i.UpdatedAt,
+	)
+	return err
+}
+
+func (s *sqliteStore) GetIntegration(ctx context.Context, id string) (*model.Integration, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, type, name, config, session_id, enabled, status, error, created_at, updated_at
+		 FROM integrations WHERE id = ?`, id,
+	)
+	return scanIntegration(row)
+}
+
+func (s *sqliteStore) ListIntegrations(ctx context.Context, userID string) ([]*model.Integration, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, user_id, type, name, config, session_id, enabled, status, error, created_at, updated_at
+		 FROM integrations WHERE user_id = ? ORDER BY created_at DESC`, userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanIntegrationRows(rows)
+}
+
+func (s *sqliteStore) UpdateIntegration(ctx context.Context, i *model.Integration) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE integrations SET name = ?, config = ?, session_id = ?, enabled = ?, status = ?, error = ?, updated_at = ? WHERE id = ?`,
+		i.Name, string(i.Config), i.SessionID, i.Enabled, i.Status, i.Error, i.UpdatedAt, i.ID,
+	)
+	return err
+}
+
+func (s *sqliteStore) DeleteIntegration(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM integrations WHERE id = ?`, id)
+	return err
+}
+
+func (s *sqliteStore) ListAllEnabledIntegrations(ctx context.Context) ([]*model.Integration, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, user_id, type, name, config, session_id, enabled, status, error, created_at, updated_at
+		 FROM integrations WHERE enabled = 1`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanIntegrationRows(rows)
+}
+
+func scanIntegration(row scannable) (*model.Integration, error) {
+	var i model.Integration
+	var config string
+	err := row.Scan(&i.ID, &i.UserID, &i.Type, &i.Name, &config, &i.SessionID,
+		&i.Enabled, &i.Status, &i.Error, &i.CreatedAt, &i.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("integration not found")
+		}
+		return nil, err
+	}
+	i.Config = json.RawMessage(config)
+	return &i, nil
+}
+
+func scanIntegrationRows(rows *sql.Rows) ([]*model.Integration, error) {
+	var result []*model.Integration
+	for rows.Next() {
+		var i model.Integration
+		var config string
+		err := rows.Scan(&i.ID, &i.UserID, &i.Type, &i.Name, &config, &i.SessionID,
+			&i.Enabled, &i.Status, &i.Error, &i.CreatedAt, &i.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		i.Config = json.RawMessage(config)
+		result = append(result, &i)
+	}
+	return result, rows.Err()
+}

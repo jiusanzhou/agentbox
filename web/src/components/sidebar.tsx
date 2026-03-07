@@ -30,6 +30,7 @@ export function Sidebar() {
     { href: "/chat", label: "Chat", icon: ChatIcon },
     { href: "/runs", label: "Runs", icon: PlayIcon },
     { href: "/skills", label: "Skills", icon: SkillsIcon },
+    { href: "/integrations", label: "Integrations", icon: IntegrationsIcon },
     { href: "/settings", label: "Settings", icon: SettingsIcon },
   ];
 
@@ -137,6 +138,21 @@ function SkillsIcon({ className }: { className?: string }) {
       <path d="M12 2 2 7l10 5 10-5-10-5Z" />
       <path d="m2 17 10 5 10-5" />
       <path d="m2 12 10 5 10-5" />
+    </svg>
+  );
+}
+
+function IntegrationsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2v6" />
+      <path d="M12 16v6" />
+      <path d="M4.93 4.93l4.24 4.24" />
+      <path d="M14.83 14.83l4.24 4.24" />
+      <path d="M2 12h6" />
+      <path d="M16 12h6" />
+      <path d="M4.93 19.07l4.24-4.24" />
+      <path d="M14.83 9.17l4.24-4.24" />
     </svg>
   );
 }
