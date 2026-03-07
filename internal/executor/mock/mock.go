@@ -2,11 +2,29 @@ package mock
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
 	"go.zoe.im/agentbox/internal/executor"
+	"go.zoe.im/x"
 )
+
+func init() {
+	executor.Register("mock", func(cfg x.TypedLazyConfig, opts ...any) (executor.Executor, error) {
+		var c struct {
+			Responses map[string]string `json:"responses"`
+		}
+		if len(cfg.Config) > 0 {
+			json.Unmarshal(cfg.Config, &c)
+		}
+		m := New()
+		for k, v := range c.Responses {
+			m.responses[k] = v
+		}
+		return m, nil
+	})
+}
 
 // MockExecutor implements executor.Executor for testing.
 type MockExecutor struct {
