@@ -33,7 +33,11 @@ import (
 	_ "go.zoe.im/agentbox/internal/store/sqlite"
 
 	// register channel implementations
+	_ "go.zoe.im/agentbox/internal/channel/discord"
+	_ "go.zoe.im/agentbox/internal/channel/slack"
 	_ "go.zoe.im/agentbox/internal/channel/telegram"
+	_ "go.zoe.im/agentbox/internal/channel/wecom"
+	_ "go.zoe.im/agentbox/internal/channel/webhook"
 
 	// register runtime implementations
 	_ "go.zoe.im/agentbox/internal/runtime"
@@ -174,9 +178,16 @@ func New(cfg *config.Config) (*Service, error) {
 	if len(cfg.Channels) > 0 {
 		router := channel.NewRouter(eng, logger)
 		for _, chCfg := range cfg.Channels {
-			ch, err := channel.New(chCfg)
+			ch, err := channel.New(chCfg, mux)
 			if err != nil {
 				return nil, fmt.Errorf("init channel %s: %w", chCfg.Type, err)
+			}
+			// Register webhook HTTP handler on shared mux.
+			if wh, ok := ch.(interface {
+				Path() string
+				HandleIncoming(http.ResponseWriter, *http.Request)
+			}); ok {
+				mux.HandleFunc("POST "+wh.Path(), wh.HandleIncoming)
 			}
 			router.Add(ch)
 		}

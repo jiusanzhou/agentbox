@@ -42,6 +42,6 @@ type Channel interface {
 }
 
 // New creates a Channel from config using the factory.
-func New(cfg x.TypedLazyConfig) (Channel, error) {
-	return Create(cfg)
+func New(cfg x.TypedLazyConfig, opts ...any) (Channel, error) {
+	return Create(cfg, opts...)
 }
