@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -260,3 +261,200 @@ func TestRuntime_OpenClawSetupCommands(t *testing.T) {
 	assert(t, len(cmds) == 1, "should have 1 setup command")
 	assert(t, strings.Contains(cmds[0], "curl"), "setup command should install curl")
 }
+
+// --- New tests: CheckRuntime, CheckAll, WrapInstallCommand, IsChinaEnv ---
+
+func TestCheckRuntime_KnownBinary(t *testing.T) {
+	// 'sh' is available on all unix systems
+	// Register a test runtime that uses 'sh' binary
+	Register("_test_sh", &testBinaryRuntime{name: "_test_sh", binary: "sh"})
+	defer func() {
+		mu.Lock()
+		delete(registry, "_test_sh")
+		mu.Unlock()
+	}()
+
+	status := CheckRuntime("_test_sh")
+	assert(t, status.Available, "sh should be available")
+	assert(t, status.Name == "_test_sh", "name should match")
+	assert(t, status.BinaryName == "sh", "binary name should be sh")
+	assert(t, status.Error == "", "should have no error")
+}
+
+func TestCheckRuntime_UnknownBinary(t *testing.T) {
+	Register("_test_missing", &testBinaryRuntime{name: "_test_missing", binary: "nonexistent_binary_xyzzy_12345"})
+	defer func() {
+		mu.Lock()
+		delete(registry, "_test_missing")
+		mu.Unlock()
+	}()
+
+	status := CheckRuntime("_test_missing")
+	assert(t, !status.Available, "nonexistent binary should not be available")
+	assert(t, strings.Contains(status.Error, "not found"), "error should say not found")
+}
+
+func TestCheckRuntime_UnknownRuntime(t *testing.T) {
+	status := CheckRuntime("totally_unknown_runtime")
+	assert(t, status.Error == "unknown runtime", "should report unknown runtime")
+}
+
+func TestCheckRuntime_NoBinary(t *testing.T) {
+	// Runtimes like "custom" and "http" have empty binary names
+	Register("_test_nobinary", &testBinaryRuntime{name: "_test_nobinary", binary: ""})
+	defer func() {
+		mu.Lock()
+		delete(registry, "_test_nobinary")
+		mu.Unlock()
+	}()
+
+	status := CheckRuntime("_test_nobinary")
+	assert(t, status.Available, "runtime with no binary should be available")
+}
+
+func TestCheckAll(t *testing.T) {
+	results := CheckAll()
+	assert(t, len(results) >= 11, "should check all registered runtimes")
+
+	names := map[string]bool{}
+	for _, r := range results {
+		names[r.Name] = true
+		assert(t, r.Name != "", "name should not be empty")
+	}
+	assert(t, names["claude"], "should include claude")
+	assert(t, names["codex"], "should include codex")
+}
+
+func TestWrapInstallCommand_ChinaMirror(t *testing.T) {
+	// Set env to enable china mirror
+	old := os.Getenv("ABOX_CHINA_MIRROR")
+	os.Setenv("ABOX_CHINA_MIRROR", "1")
+	defer os.Setenv("ABOX_CHINA_MIRROR", old)
+
+	// npm install gets registry
+	cmd := WrapInstallCommand("npm install -g something")
+	assert(t, strings.Contains(cmd, "--registry="), "npm should get registry flag")
+	assert(t, strings.Contains(cmd, "npmmirror"), "should use npmmirror")
+
+	// pip install gets index
+	cmd = WrapInstallCommand("pip install package")
+	assert(t, strings.Contains(cmd, "-i"), "pip should get -i flag")
+	assert(t, strings.Contains(cmd, "tsinghua"), "should use tsinghua mirror")
+
+	// go install gets GOPROXY
+	cmd = WrapInstallCommand("go install example.com/tool@latest")
+	assert(t, strings.HasPrefix(cmd, "GOPROXY="), "go install should get GOPROXY prefix")
+	assert(t, strings.Contains(cmd, "goproxy.cn"), "should use goproxy.cn")
+}
+
+func TestWrapInstallCommand_NoChinaMirror(t *testing.T) {
+	old := os.Getenv("ABOX_CHINA_MIRROR")
+	oldTZ := os.Getenv("TZ")
+	oldLang := os.Getenv("LANG")
+
+	os.Setenv("ABOX_CHINA_MIRROR", "")
+	os.Setenv("TZ", "America/New_York")
+	os.Setenv("LANG", "en_US.UTF-8")
+	defer func() {
+		os.Setenv("ABOX_CHINA_MIRROR", old)
+		os.Setenv("TZ", oldTZ)
+		os.Setenv("LANG", oldLang)
+	}()
+
+	cmd := WrapInstallCommand("npm install -g something")
+	assert(t, cmd == "npm install -g something", "command should be unchanged: got "+cmd)
+
+	cmd = WrapInstallCommand("pip install package")
+	assert(t, cmd == "pip install package", "pip command should be unchanged")
+
+	cmd = WrapInstallCommand("go install example.com/tool@latest")
+	assert(t, cmd == "go install example.com/tool@latest", "go command should be unchanged")
+}
+
+func TestWrapInstallCommand_EmptyCommand(t *testing.T) {
+	cmd := WrapInstallCommand("")
+	assert(t, cmd == "", "empty command should remain empty")
+}
+
+func TestIsChinaEnv_WithTZ(t *testing.T) {
+	oldTZ := os.Getenv("TZ")
+	oldLang := os.Getenv("LANG")
+	oldMirror := os.Getenv("ABOX_CHINA_MIRROR")
+	defer func() {
+		os.Setenv("TZ", oldTZ)
+		os.Setenv("LANG", oldLang)
+		os.Setenv("ABOX_CHINA_MIRROR", oldMirror)
+	}()
+
+	os.Setenv("LANG", "en_US.UTF-8")
+	os.Setenv("ABOX_CHINA_MIRROR", "")
+
+	os.Setenv("TZ", "Asia/Shanghai")
+	assert(t, IsChinaEnv(), "Asia/Shanghai should be china env")
+
+	os.Setenv("TZ", "America/New_York")
+	assert(t, !IsChinaEnv(), "America/New_York should not be china env")
+
+	os.Setenv("TZ", "PRC")
+	assert(t, IsChinaEnv(), "PRC should be china env")
+}
+
+func TestIsChinaEnv_WithLang(t *testing.T) {
+	oldTZ := os.Getenv("TZ")
+	oldLang := os.Getenv("LANG")
+	oldMirror := os.Getenv("ABOX_CHINA_MIRROR")
+	defer func() {
+		os.Setenv("TZ", oldTZ)
+		os.Setenv("LANG", oldLang)
+		os.Setenv("ABOX_CHINA_MIRROR", oldMirror)
+	}()
+
+	os.Setenv("TZ", "America/New_York")
+	os.Setenv("ABOX_CHINA_MIRROR", "")
+
+	os.Setenv("LANG", "zh_CN.UTF-8")
+	assert(t, IsChinaEnv(), "zh_CN lang should be china env")
+
+	os.Setenv("LANG", "en_US.UTF-8")
+	assert(t, !IsChinaEnv(), "en_US lang should not be china env")
+}
+
+func TestIsChinaEnv_WithExplicitEnv(t *testing.T) {
+	oldTZ := os.Getenv("TZ")
+	oldLang := os.Getenv("LANG")
+	oldMirror := os.Getenv("ABOX_CHINA_MIRROR")
+	defer func() {
+		os.Setenv("TZ", oldTZ)
+		os.Setenv("LANG", oldLang)
+		os.Setenv("ABOX_CHINA_MIRROR", oldMirror)
+	}()
+
+	os.Setenv("TZ", "America/New_York")
+	os.Setenv("LANG", "en_US.UTF-8")
+
+	os.Setenv("ABOX_CHINA_MIRROR", "1")
+	assert(t, IsChinaEnv(), "ABOX_CHINA_MIRROR=1 should be china env")
+
+	os.Setenv("ABOX_CHINA_MIRROR", "true")
+	assert(t, IsChinaEnv(), "ABOX_CHINA_MIRROR=true should be china env")
+
+	os.Setenv("ABOX_CHINA_MIRROR", "0")
+	assert(t, !IsChinaEnv(), "ABOX_CHINA_MIRROR=0 should not be china env")
+}
+
+// testBinaryRuntime is a minimal runtime implementation for testing CheckRuntime.
+type testBinaryRuntime struct {
+	name   string
+	binary string
+}
+
+func (r *testBinaryRuntime) Name() string                                    { return r.name }
+func (r *testBinaryRuntime) Image() string                                   { return "" }
+func (r *testBinaryRuntime) BuildExecArgs(msg string, continued bool) []string { return nil }
+func (r *testBinaryRuntime) ParseStreamLine(line string) (string, string, bool) {
+	return "", "", false
+}
+func (r *testBinaryRuntime) EnvKeys() []string       { return nil }
+func (r *testBinaryRuntime) SetupCommands() []string  { return nil }
+func (r *testBinaryRuntime) BinaryName() string       { return r.binary }
+func (r *testBinaryRuntime) InstallCommand() string   { return "" }

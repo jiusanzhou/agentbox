@@ -33,6 +33,8 @@ func (t *testRuntime) ParseStreamLine(line string) (string, string, bool) {
 
 func (t *testRuntime) EnvKeys() []string       { return nil }
 func (t *testRuntime) SetupCommands() []string { return nil }
+func (t *testRuntime) BinaryName() string      { return "" }
+func (t *testRuntime) InstallCommand() string  { return "" }
 
 func init() {
 	runtime.Register("test", &testRuntime{})
@@ -350,3 +352,5 @@ func (t *envTestRuntime) ParseStreamLine(line string) (string, string, bool) {
 }
 func (t *envTestRuntime) EnvKeys() []string       { return []string{"MY_TEST_VAR"} }
 func (t *envTestRuntime) SetupCommands() []string { return nil }
+func (t *envTestRuntime) BinaryName() string      { return "" }
+func (t *envTestRuntime) InstallCommand() string  { return "" }
