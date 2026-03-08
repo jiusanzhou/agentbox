@@ -30,6 +30,7 @@ type Run struct {
 	Mode      RunMode    `json:"mode"`
 	Status    RunStatus  `json:"status"`
 	Runtime   string     `json:"runtime,omitempty"`
+	Executor  string     `json:"executor,omitempty"` // docker, local, tunnel
 	AgentFile string     `json:"agent_file"`
 	Config    RunConfig  `json:"config"`
 	Result    *Result    `json:"result,omitempty"`

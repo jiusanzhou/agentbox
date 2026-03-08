@@ -140,8 +140,22 @@ func (e *Engine) List(ctx context.Context, limit, offset int) ([]*model.Run, err
 // selectExecutor picks the tunnel executor if available and the run has a UserID,
 // otherwise falls back to the default executor.
 func (e *Engine) selectExecutor(run *model.Run) executor.Executor {
-	if e.tunnelExec != nil && run.UserID != "" {
-		return e.tunnelExec
+	switch run.Executor {
+	case "tunnel":
+		if e.tunnelExec != nil {
+			return e.tunnelExec
+		}
+	case "local":
+		// "local" explicitly means the default executor (which is local when configured)
+		return e.executor
+	case "docker", "k8s", "kubernetes":
+		// These all use the default executor (which should be docker/k8s)
+		return e.executor
+	default:
+		// Auto-select: prefer tunnel if user has an active connection
+		if e.tunnelExec != nil && run.UserID != "" {
+			return e.tunnelExec
+		}
 	}
 	return e.executor
 }

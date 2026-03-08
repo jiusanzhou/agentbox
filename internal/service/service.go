@@ -379,6 +379,8 @@ func (s *Service) Shutdown(ctx context.Context) error {
 type CreateRunRequest struct {
 	Name      string          `json:"name"`
 	AgentFile string          `json:"agent_file"`
+	Runtime   string          `json:"runtime,omitempty"`
+	Executor  string          `json:"executor,omitempty"` // docker, local, tunnel (empty = auto)
 	Config    model.RunConfig `json:"config"`
 }
 
@@ -391,8 +393,12 @@ func (s *Service) CreateRun(ctx context.Context, req *CreateRunRequest) (*model.
 	run := &model.Run{
 		ID:        shortID(),
 		Name:      req.Name,
+		Runtime:   req.Runtime,
 		AgentFile: req.AgentFile,
 		Config:    req.Config,
+	}
+	if run.Runtime == "" {
+		run.Runtime = "claude"
 	}
 	if run.Config.Timeout == 0 {
 		run.Config.Timeout = 3600
@@ -453,6 +459,7 @@ type CreateSessionRequest struct {
 	Name      string          `json:"name"`
 	AgentFile string          `json:"agent_file"`
 	Runtime   string          `json:"runtime"`
+	Executor  string          `json:"executor,omitempty"` // docker, local, tunnel (empty = auto)
 	Config    model.RunConfig `json:"config"`
 }
 
