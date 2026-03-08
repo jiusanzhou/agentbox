@@ -101,7 +101,7 @@ func TestE2E_AuthFlow(t *testing.T) {
 
 	// Register
 	status, body := doJSON(t, "POST", ts.URL+"/api/v1/authregister", "",
-		`{"email":"auth@test.com","password":"pass123","name":"Auth"}`)
+		`{"email":"auth@test.com","password":"pass1234","name":"Auth"}`)
 	assert(t, status == 200, "register: "+string(body))
 	var reg struct {
 		Token string `json:"token"`
@@ -114,7 +114,7 @@ func TestE2E_AuthFlow(t *testing.T) {
 
 	// Login
 	status, _ = doJSON(t, "POST", ts.URL+"/api/v1/authlogin", "",
-		`{"email":"auth@test.com","password":"pass123"}`)
+		`{"email":"auth@test.com","password":"pass1234"}`)
 	assert(t, status == 200, "login failed")
 
 	// Get Me with JWT
@@ -134,12 +134,12 @@ func TestE2E_AuthFlow(t *testing.T) {
 
 	// Wrong password
 	status, _ = doJSON(t, "POST", ts.URL+"/api/v1/authlogin", "",
-		`{"email":"auth@test.com","password":"wrong"}`)
+		`{"email":"auth@test.com","password":"wrongpwd"}`)
 	assert(t, status != 200, "wrong password should fail")
 
 	// Duplicate
 	status, _ = doJSON(t, "POST", ts.URL+"/api/v1/authregister", "",
-		`{"email":"auth@test.com","password":"pass123","name":"Dup"}`)
+		`{"email":"auth@test.com","password":"pass1234","name":"Dup"}`)
 	assert(t, status != 200, "duplicate should fail")
 }
 

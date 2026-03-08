@@ -77,10 +77,10 @@ func TestAuth_DuplicateEmail(t *testing.T) {
 	a := New(s, "test-secret-key")
 	ctx := context.Background()
 
-	_, err := a.Register(ctx, "dup@example.com", "pass1", "User 1")
+	_, err := a.Register(ctx, "dup@example.com", "password1!", "User 1")
 	assert(t, err == nil, "first register should succeed")
 
-	_, err = a.Register(ctx, "dup@example.com", "pass2", "User 2")
+	_, err = a.Register(ctx, "dup@example.com", "password2!", "User 2")
 	assert(t, err != nil, "duplicate email should fail")
 	assert(t, err == ErrUserExists, "error should be ErrUserExists")
 }
@@ -100,13 +100,45 @@ func TestAuth_EmptySecret(t *testing.T) {
 	ctx := context.Background()
 
 	// Should still work with auto-generated secret
-	user, err := a.Register(ctx, "test@example.com", "pass", "Test")
+	user, err := a.Register(ctx, "test@example.com", "password123", "Test")
 	assert(t, err == nil, "register with empty secret should succeed")
 
-	token, _, err := a.Login(ctx, "test@example.com", "pass")
+	token, _, err := a.Login(ctx, "test@example.com", "password123")
 	assert(t, err == nil, "login should succeed")
 
 	validated, err := a.ValidateToken(ctx, token)
 	assert(t, err == nil, "validate should succeed")
 	assert(t, validated.ID == user.ID, "user ID should match")
+}
+
+func TestAuth_PasswordValidation(t *testing.T) {
+	s := memory.New()
+	a := New(s, "test-secret-key")
+	ctx := context.Background()
+
+	// Too short
+	_, err := a.Register(ctx, "test@example.com", "short", "Test")
+	assert(t, err == ErrWeakPassword, "short password should fail")
+
+	// Valid
+	_, err = a.Register(ctx, "test@example.com", "longpassword", "Test")
+	assert(t, err == nil, "valid password should succeed")
+}
+
+func TestAuth_EmailValidation(t *testing.T) {
+	s := memory.New()
+	a := New(s, "test-secret-key")
+	ctx := context.Background()
+
+	// No @
+	_, err := a.Register(ctx, "invalid", "password123", "Test")
+	assert(t, err == ErrInvalidEmail, "email without @ should fail")
+
+	// No dot in domain
+	_, err = a.Register(ctx, "test@localhost", "password123", "Test")
+	assert(t, err == ErrInvalidEmail, "email without dot in domain should fail")
+
+	// Valid
+	_, err = a.Register(ctx, "test@example.com", "password123", "Test")
+	assert(t, err == nil, "valid email should succeed")
 }

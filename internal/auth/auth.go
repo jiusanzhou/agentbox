@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,6 +21,8 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrUserExists         = errors.New("user already exists")
 	ErrInvalidToken       = errors.New("invalid token")
+	ErrWeakPassword       = errors.New("password must be at least 8 characters")
+	ErrInvalidEmail       = errors.New("invalid email address")
 )
 
 // Auth handles user authentication.
@@ -39,8 +42,18 @@ func New(s store.Store, jwtSecret string) *Auth {
 	return &Auth{store: s, jwtSecret: secret}
 }
 
-// Register creates a new user.
+// Register creates a new user with validation.
 func (a *Auth) Register(ctx context.Context, email, password, name string) (*model.User, error) {
+	// Validate email
+	if !isValidEmail(email) {
+		return nil, ErrInvalidEmail
+	}
+
+	// Validate password
+	if len(password) < 8 {
+		return nil, ErrWeakPassword
+	}
+
 	// Check if user exists
 	if _, err := a.store.GetUserByEmail(ctx, email); err == nil {
 		return nil, ErrUserExists
@@ -157,4 +170,14 @@ func randomHex(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// isValidEmail performs a basic email validation: must contain @ and . after @.
+func isValidEmail(email string) bool {
+	at := strings.IndexByte(email, '@')
+	if at < 1 {
+		return false
+	}
+	domain := email[at+1:]
+	return strings.ContainsRune(domain, '.')
 }

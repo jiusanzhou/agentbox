@@ -340,6 +340,36 @@ func (e *Engine) cleanupExpiredSessions(ctx context.Context, ttl time.Duration) 
 	}
 }
 
+// StopAll stops all active sessions cleanly.
+func (e *Engine) StopAll(ctx context.Context) {
+	runs, err := e.store.ListRuns(ctx, 1000, 0)
+	if err != nil {
+		e.logger.Error("stop all: list runs failed", "err", err)
+		return
+	}
+
+	stopped := 0
+	for _, run := range runs {
+		if run.Mode == model.RunModeSession && run.Status == model.RunStatusRunning {
+			if err := e.StopSession(ctx, run.ID); err != nil {
+				e.logger.Error("stop all: failed to stop session", "id", run.ID, "err", err)
+			} else {
+				stopped++
+			}
+		}
+	}
+
+	// Cancel all active one-shot runs
+	e.mu.Lock()
+	for id, cancel := range e.active {
+		cancel()
+		e.logger.Info("cancelled active run", "id", id)
+	}
+	e.mu.Unlock()
+
+	e.logger.Info("stopped all sessions", "count", stopped)
+}
+
 // RecoverSessions scans for running containers/pods and reconciles with the store.
 func (e *Engine) RecoverSessions(ctx context.Context) error {
 	ids, err := e.executor.RecoverSessions(ctx)

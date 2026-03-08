@@ -2,8 +2,10 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"sync"
@@ -66,7 +68,11 @@ func (m *installManager) start(name, command string) (*installJob, error) {
 }
 
 func (m *installManager) run(job *installJob) {
-	cmd := exec.Command("sh", "-c", job.Command)
+	// 5 minute timeout for install processes
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", job.Command)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -86,18 +92,32 @@ func (m *installManager) run(job *installJob) {
 		return
 	}
 
-	scanner := bufio.NewScanner(stdout)
+	// Limit output to 1MB
+	const maxOutput = 1 << 20 // 1MB
+	var totalOutput int
+	scanner := bufio.NewScanner(io.LimitReader(stdout, maxOutput))
 	for scanner.Scan() {
 		line := scanner.Text()
+		totalOutput += len(line)
 		job.mu.Lock()
 		job.Output = append(job.Output, line)
 		job.mu.Unlock()
+		if totalOutput >= maxOutput {
+			job.mu.Lock()
+			job.Output = append(job.Output, "[output truncated at 1MB]")
+			job.mu.Unlock()
+			break
+		}
 	}
 
 	if err := cmd.Wait(); err != nil {
 		job.mu.Lock()
 		job.Status = "failed"
-		job.Error = err.Error()
+		if ctx.Err() == context.DeadlineExceeded {
+			job.Error = "install timed out after 5 minutes"
+		} else {
+			job.Error = err.Error()
+		}
 		job.mu.Unlock()
 		return
 	}
@@ -116,6 +136,7 @@ func (s *Service) GetRuntimesStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // InstallRuntime starts a background install for a runtime.
+// Only allows commands from the runtime's InstallCommand() — no user-supplied commands.
 func (s *Service) InstallRuntime(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
@@ -131,7 +152,14 @@ func (s *Service) InstallRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := runtime.WrapInstallCommand(rt.InstallCommand())
+	// Only allow the runtime's own install command — no user-supplied commands
+	baseCmd := rt.InstallCommand()
+	if baseCmd == "" {
+		http.Error(w, `{"error":"runtime does not support automatic install"}`, http.StatusBadRequest)
+		return
+	}
+
+	cmd := runtime.WrapInstallCommand(baseCmd)
 	if cmd == "" {
 		http.Error(w, `{"error":"runtime does not support automatic install"}`, http.StatusBadRequest)
 		return

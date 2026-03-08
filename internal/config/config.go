@@ -1,7 +1,11 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"log/slog"
+	"os"
 
 	"go.zoe.im/x"
 )
@@ -98,4 +102,21 @@ func NewConfig() *Config {
 			Config: json.RawMessage(`{"addr":":8080"}`),
 		},
 	}
+}
+
+// ResolveJWTSecret ensures a JWT secret is set.
+// Priority: config value → JWT_SECRET env var → random generated secret.
+func (c *Config) ResolveJWTSecret() {
+	if c.Auth.JWTSecret != "" && c.Auth.JWTSecret != "abox-dev-secret-2026" {
+		return
+	}
+	if env := os.Getenv("JWT_SECRET"); env != "" {
+		c.Auth.JWTSecret = env
+		return
+	}
+	// Generate a random 32-byte secret
+	b := make([]byte, 32)
+	rand.Read(b)
+	c.Auth.JWTSecret = hex.EncodeToString(b)
+	slog.Warn("no JWT secret configured, generated random secret (set JWT_SECRET env var for production)")
 }

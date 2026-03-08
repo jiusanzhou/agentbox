@@ -9,7 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"go.zoe.im/agentbox/internal/auth"
@@ -95,6 +98,7 @@ type Service struct {
 	hub          *tunnel.Hub
 	mux          *http.ServeMux
 	limiter      *ratelimit.Limiter
+	authLimiter  *auth.AuthRateLimiter
 	store        store.Store
 	installs     *installManager
 	logger       *slog.Logger
@@ -127,6 +131,7 @@ func New(cfg *config.Config) (*Service, error) {
 	// Create auth (if enabled)
 	var authInst *auth.Auth
 	if cfg.Auth.Enabled {
+		cfg.ResolveJWTSecret()
 		authInst = auth.New(s, cfg.Auth.JWTSecret)
 	}
 
@@ -169,16 +174,17 @@ func New(cfg *config.Config) (*Service, error) {
 	eng.SetTunnelExecutor(tunnelexec.New(hub))
 
 	svc := &Service{
-		cfg:      cfg,
-		engine:   eng,
-		storage:  st,
-		server:   server,
-		auth:     authInst,
-		hub:      hub,
-		mux:      mux,
-		store:    s,
-		installs: newInstallManager(),
-		logger:   logger,
+		cfg:         cfg,
+		engine:      eng,
+		storage:     st,
+		server:      server,
+		auth:        authInst,
+		hub:         hub,
+		mux:         mux,
+		store:       s,
+		authLimiter: auth.NewAuthRateLimiter(),
+		installs:    newInstallManager(),
+		logger:      logger,
 	}
 
 	// Register SSE streaming endpoint (raw HTTP, not via talk)
@@ -257,7 +263,7 @@ func New(cfg *config.Config) (*Service, error) {
 	return svc, nil
 }
 
-// Start runs the server and channel router.
+// Start runs the server and channel router with graceful shutdown.
 func (s *Service) Start(ctx context.Context) error {
 	// Recover existing sessions from running containers/pods
 	if err := s.engine.RecoverSessions(ctx); err != nil {
@@ -299,6 +305,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// CORS middleware
 	handler = corsMiddleware(s.cfg.CORS)(handler)
 
+	// Auth rate limiting middleware (per-IP, applied to auth paths)
+	handler = s.authRateLimitMiddleware(handler)
+
 	// Rate limiting middleware
 	s.limiter = ratelimit.New(s.cfg.RateLimit)
 	handler = s.limiter.Middleware(func(r *http.Request) string {
@@ -336,14 +345,79 @@ func (s *Service) Start(ctx context.Context) error {
 	go s.engine.StartCleanup(ctx, ttl, cleanupInterval)
 	s.logger.Info("session cleanup started", "ttl", ttl, "interval", cleanupInterval)
 
+	// Security headers middleware
+	handler = securityHeadersMiddleware(handler)
+
 	// Middleware to extract API provider headers into context
 	handler = apiHeaderMiddleware(handler)
+
 	httpSrv := &http.Server{Addr: s.cfg.Addr, Handler: handler}
+
+	// Graceful shutdown handler
+	shutdownCh := make(chan os.Signal, 1)
+	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		<-ctx.Done()
-		httpSrv.Shutdown(context.Background())
+		select {
+		case sig := <-shutdownCh:
+			s.logger.Info("received shutdown signal", "signal", sig)
+		case <-ctx.Done():
+			s.logger.Info("context cancelled, initiating shutdown")
+		}
+
+		s.logger.Info("stopping HTTP server...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			s.logger.Error("HTTP server shutdown error", "err", err)
+		}
+
+		s.logger.Info("stopping all active sessions...")
+		s.engine.StopAll(shutdownCtx)
+
+		s.logger.Info("stopping channel router...")
+		if s.router != nil {
+			_ = s.router.Stop(shutdownCtx)
+		}
+		if s.integrations != nil {
+			_ = s.integrations.Stop(shutdownCtx)
+		}
+
+		s.logger.Info("closing database...")
+		if closer, ok := s.store.(interface{ Close(context.Context) error }); ok {
+			_ = closer.Close(shutdownCtx)
+		}
+
+		s.logger.Info("shutdown complete")
 	}()
+
 	return httpSrv.ListenAndServe()
+}
+
+// authRateLimitMiddleware applies per-IP rate limiting to auth endpoints.
+func (s *Service) authRateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.HasSuffix(path, "/authlogin") || strings.HasSuffix(path, "/auth/login"):
+			s.authLimiter.LimitLogin(next).ServeHTTP(w, r)
+		case strings.HasSuffix(path, "/authregister") || strings.HasSuffix(path, "/auth/register"):
+			s.authLimiter.LimitRegister(next).ServeHTTP(w, r)
+		default:
+			next.ServeHTTP(w, r)
+		}
+	})
+}
+
+// securityHeadersMiddleware adds security headers to all responses.
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // apiHeaderMiddleware extracts x-api-key, x-base-url, x-model headers into context.

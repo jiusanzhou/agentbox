@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,13 +21,30 @@ type GitHubConfig struct {
 	CallbackURL  string
 }
 
-// HandleGitHubLogin redirects to GitHub's authorization URL.
+// HandleGitHubLogin redirects to GitHub's authorization URL with CSRF state.
 func (a *Auth) HandleGitHubLogin(cfg GitHubConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Generate random state for CSRF protection
+		stateBytes := make([]byte, 16)
+		rand.Read(stateBytes)
+		state := hex.EncodeToString(stateBytes)
+
+		// Store state in a secure httponly cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "abox_oauth_state",
+			Value:    state,
+			Path:     "/",
+			MaxAge:   600, // 10 minutes
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   r.TLS != nil,
+		})
+
 		u := fmt.Sprintf(
-			"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=user:email",
+			"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=user:email&state=%s",
 			url.QueryEscape(cfg.ClientID),
 			url.QueryEscape(cfg.CallbackURL),
+			url.QueryEscape(state),
 		)
 		http.Redirect(w, r, u, http.StatusTemporaryRedirect)
 	}
@@ -34,6 +53,28 @@ func (a *Auth) HandleGitHubLogin(cfg GitHubConfig) http.HandlerFunc {
 // HandleGitHubCallback exchanges the code for a token, fetches user info, and returns JWT.
 func (a *Auth) HandleGitHubCallback(cfg GitHubConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Verify CSRF state
+		stateCookie, err := r.Cookie("abox_oauth_state")
+		if err != nil || stateCookie.Value == "" {
+			http.Error(w, `{"error":"missing oauth state"}`, http.StatusForbidden)
+			return
+		}
+		stateParam := r.URL.Query().Get("state")
+		if stateParam == "" || stateParam != stateCookie.Value {
+			http.Error(w, `{"error":"oauth state mismatch"}`, http.StatusForbidden)
+			return
+		}
+
+		// Clear the state cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "abox_oauth_state",
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			http.Error(w, `{"error":"missing code"}`, http.StatusBadRequest)
