@@ -422,6 +422,21 @@ func (s *Service) GetRun(ctx context.Context, id string) (*model.Run, error) {
 func (s *Service) ListRuns(ctx context.Context) ([]*model.Run, error) {
 	return s.engine.List(ctx, 50, 0)
 }
+// ListSessions handles GET /sessions — returns only session-mode runs.
+func (s *Service) ListSessions(ctx context.Context) ([]*model.Run, error) {
+	all, err := s.engine.List(ctx, 50, 0)
+	if err != nil {
+		return nil, err
+	}
+	var sessions []*model.Run
+	for _, r := range all {
+		if r.Mode == model.RunModeSession {
+			sessions = append(sessions, r)
+		}
+	}
+	return sessions, nil
+}
+
 
 type CancelRunResponse struct {
 	Status string `json:"status"`
