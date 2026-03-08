@@ -8,6 +8,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { clientFetch, getAiSettings } from "@/lib/api";
 import type { Session, Message } from "@/lib/types";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 export default function ChatPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -317,11 +319,21 @@ export default function ChatPage() {
                         : "bg-muted"
                     )}
                   >
-                    <p className="text-sm whitespace-pre-wrap">
-                      {msg.content || (sending && msg.role === "assistant" ? (
-                        <span className="text-muted-foreground animate-pulse">Thinking...</span>
-                      ) : msg.content)}
-                    </p>
+                    {msg.role === "assistant" ? (
+                      msg.content ? (
+                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_code:not(pre_code)]:bg-muted [&_code:not(pre_code)]:rounded [&_code:not(pre_code)]:px-1">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        sending ? (
+                          <span className="text-sm text-muted-foreground animate-pulse">Thinking...</span>
+                        ) : null
+                      )
+                    ) : (
+                      <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    )}
                   </Card>
                 </div>
               ))}

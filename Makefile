@@ -62,7 +62,7 @@ define BUILD_BINARY
 $(GO) build ${DEBUG_GO_GCFLAGS} ${GO_GCFLAGS} ${GO_BUILD_FLAGS} -o $@ ${GO_LDFLAGS} ${GO_TAGS}  ./$<
 endef
 
-.PHONY: all build binaries test clean docker help
+.PHONY: all build binaries test clean docker help release
 .DEFAULT: default
 .DEFAULT_GOAL := all
 
@@ -72,6 +72,8 @@ bin/%: cmd/% FORCE
 
 all: binaries
 
+build: binaries ## alias for binaries
+
 binaries: $(BINARIES) ## build binaries
 	@echo "$(WHALE) $@"
 
@@ -79,14 +81,19 @@ test:
 	@echo "Execute test"
 	@go test ./...
 
+release: ## create release with goreleaser
+	goreleaser release --clean
+
 clean:
-	rm -rf bin/
+	rm -rf bin/ dist/
 
 docker-sandbox:
 	docker build -t agentbox-sandbox:latest -f deploy/sandbox/Dockerfile .
 
 help:
 	@echo "make                  build all binaries"
+	@echo "make build            build all binaries"
 	@echo "make test             execute tests"
+	@echo "make release          create release with goreleaser"
 	@echo "make clean            remove build artifacts"
 	@echo "make docker-sandbox   build sandbox container image"

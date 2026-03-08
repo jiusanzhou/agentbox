@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { clientFetch } from "@/lib/api";
 import type { Skill } from "@/lib/types";
 
-const SKILLS: Skill[] = [
+const FALLBACK_SKILLS: Skill[] = [
   {
     id: "code-review",
     name: "Code Review",
@@ -75,16 +75,35 @@ const SKILLS: Skill[] = [
   },
 ];
 
-const CATEGORIES = ["All", ...Array.from(new Set(SKILLS.map((s) => s.category)))];
-
 export default function SkillsPage() {
   const router = useRouter();
+  const [skills, setSkills] = useState<Skill[]>(FALLBACK_SKILLS);
+  const [loadingSkills, setLoadingSkills] = useState(true);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [runningSkill, setRunningSkill] = useState<string | null>(null);
 
+  useEffect(() => {
+    clientFetch("/api/skills")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setSkills(data);
+        }
+      })
+      .catch(() => {
+        // Keep fallback skills
+      })
+      .finally(() => setLoadingSkills(false));
+  }, []);
+
+  const categories = useMemo(
+    () => ["All", ...Array.from(new Set(skills.map((s) => s.category)))],
+    [skills]
+  );
+
   const filtered = useMemo(() => {
-    return SKILLS.filter((s) => {
+    return skills.filter((s) => {
       const matchesCategory = category === "All" || s.category === category;
       const matchesSearch =
         !search ||
@@ -92,7 +111,7 @@ export default function SkillsPage() {
         s.description.toLowerCase().includes(search.toLowerCase());
       return matchesCategory && matchesSearch;
     });
-  }, [search, category]);
+  }, [skills, search, category]);
 
   const runSkill = async (skill: Skill) => {
     setRunningSkill(skill.id);
@@ -133,7 +152,7 @@ export default function SkillsPage() {
           className="sm:max-w-xs"
         />
         <div className="flex gap-2 flex-wrap">
-          {CATEGORIES.map((cat) => (
+          {categories.map((cat) => (
             <Button
               key={cat}
               variant={category === cat ? "default" : "outline"}
@@ -145,6 +164,13 @@ export default function SkillsPage() {
           ))}
         </div>
       </div>
+
+      {/* Loading */}
+      {loadingSkills && (
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          Loading skills...
+        </div>
+      )}
 
       {/* Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -177,7 +203,7 @@ export default function SkillsPage() {
         ))}
       </div>
 
-      {filtered.length === 0 && (
+      {!loadingSkills && filtered.length === 0 && (
         <div className="py-12 text-center text-sm text-muted-foreground">
           No skills match your search
         </div>

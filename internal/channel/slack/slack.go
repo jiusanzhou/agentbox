@@ -34,13 +34,14 @@ type Config struct {
 
 // Slack implements channel.Channel using Socket Mode.
 type Slack struct {
-	api    *slack.Client
-	cfg    Config
-	handler channel.Handler
-	logger  *slog.Logger
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	botID   string
+	api       *slack.Client
+	cfg       Config
+	handler   channel.Handler
+	cbHandler channel.CallbackHandler
+	logger    *slog.Logger
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	botID     string
 }
 
 // New creates a Slack channel.
@@ -124,6 +125,30 @@ func (s *Slack) handleEvent(ctx context.Context, sm *socketmode.Client, evt sock
 				s.dispatch(ctx, ev.Channel, ev.User, ev.Text, ev.TimeStamp, ev.ThreadTimeStamp)
 			}
 		}
+
+	case socketmode.EventTypeInteractive:
+		interaction, ok := evt.Data.(slack.InteractionCallback)
+		if !ok {
+			return
+		}
+		sm.Ack(*evt.Request)
+
+		if s.cbHandler == nil {
+			return
+		}
+
+		for _, action := range interaction.ActionCallback.BlockActions {
+			cb := &channel.Callback{
+				ID:        action.ActionID,
+				ChatID:    interaction.Channel.ID,
+				UserID:    interaction.User.ID,
+				MessageID: interaction.Message.Timestamp,
+				Extra:     map[string]string{"channel": "slack"},
+			}
+			if err := s.cbHandler(ctx, cb); err != nil {
+				s.logger.Error("handle callback failed", "action_id", action.ActionID, "err", err)
+			}
+		}
 	}
 }
 
@@ -167,6 +192,44 @@ func (s *Slack) Send(ctx context.Context, chatID string, text string, opts *chan
 
 	_, _, err := s.api.PostMessage(chatID, options...)
 	return err
+}
+
+// EditMessage edits an existing Slack message (chat.update).
+func (s *Slack) EditMessage(ctx context.Context, chatID string, messageID string, text string, opts *channel.SendOptions) error {
+	_, _, _, err := s.api.UpdateMessage(chatID, messageID, slack.MsgOptionText(text, false))
+	return err
+}
+
+// SendWithButtons sends a message with Block Kit buttons.
+func (s *Slack) SendWithButtons(ctx context.Context, chatID string, text string, buttons []channel.Button, opts *channel.SendOptions) (string, error) {
+	var blockElements []slack.BlockElement
+	for _, b := range buttons {
+		blockElements = append(blockElements, slack.NewButtonBlockElement(b.ID, b.ID, slack.NewTextBlockObject("plain_text", b.Text, false, false)))
+	}
+
+	section := slack.NewSectionBlock(
+		slack.NewTextBlockObject("mrkdwn", text, false, false),
+		nil, nil,
+	)
+	actions := slack.NewActionBlock("", blockElements...)
+
+	msgOpts := []slack.MsgOption{
+		slack.MsgOptionBlocks(section, actions),
+	}
+	if opts != nil && opts.ReplyToID != "" {
+		msgOpts = append(msgOpts, slack.MsgOptionTS(opts.ReplyToID))
+	}
+
+	_, ts, err := s.api.PostMessage(chatID, msgOpts...)
+	if err != nil {
+		return "", err
+	}
+	return ts, nil
+}
+
+// OnCallback registers a handler for button click callbacks.
+func (s *Slack) OnCallback(handler channel.CallbackHandler) {
+	s.cbHandler = handler
 }
 
 // Stop gracefully disconnects from Slack.

@@ -42,36 +42,38 @@ For power users who need local file access, browser automation, or custom MCP to
 - [x] IM channels (Telegram)
 - [x] Agent skills repo (20+ skills)
 
-### Phase 1 — SaaS Foundation 🔄
+### Phase 1 — SaaS Foundation ✅
 > Multi-tenant platform with user accounts and web UI
 
 **1.1 User System**
-- [ ] User model (id, email, name, avatar, plan, api_key)
-- [ ] Auth: email/password + OAuth (GitHub, Google)
-- [ ] JWT tokens for API + session cookies for web
-- [ ] API key auth for programmatic access
-- [ ] Multi-tenant isolation: user can only see own runs/sessions
+- [x] User model (id, email, name, avatar, plan, api_key)
+- [x] Auth: email/password
+- [ ] Auth: OAuth (GitHub, Google)
+- [x] JWT tokens for API + session cookies for web
+- [x] API key auth for programmatic access
+- [x] Multi-tenant isolation: user can only see own runs/sessions
 
 **1.2 Web App (Product UI)**
-- [ ] Landing page with sign-up CTA
-- [ ] Dashboard: my runs, my sessions, usage stats
-- [ ] Agent marketplace: browse skills, one-click run
-- [ ] Chat interface: web-based interactive session (WebSocket)
-- [ ] Run detail page: logs, artifacts, status
-- [ ] Settings: API keys, connected IMs, billing
+- [x] Landing page with sign-up CTA
+- [x] Dashboard: my runs, my sessions, usage stats
+- [x] Agent marketplace: browse skills, one-click run
+- [x] Chat interface: web-based SSE streaming session
+- [x] Run detail page: logs, artifacts, status
+- [x] Settings: API keys, connected IMs, admin panel
+- [ ] Billing UI (Stripe)
 
 **1.3 API Hardening**
-- [ ] Auth middleware (JWT + API key)
-- [ ] Rate limiting per user/plan
-- [ ] Request validation
+- [x] Auth middleware (JWT + API key)
+- [x] Rate limiting per user/plan
+- [ ] Request validation (structured)
 - [ ] CORS configuration
 - [ ] WebSocket endpoint for real-time chat
 
 **1.4 Infrastructure**
-- [ ] LICENSE (MIT)
-- [ ] CI/CD (GitHub Actions: test, build, push image)
-- [ ] Server Dockerfile (abox server image)
-- [ ] docker-compose.yaml (one-click local dev)
+- [x] LICENSE (MIT)
+- [x] CI/CD (GitHub Actions: test, build, push image)
+- [x] Server Dockerfile (abox server image)
+- [x] docker-compose.yaml (one-click local dev)
 - [ ] Helm chart for K8s deployment
 - [ ] Goreleaser for multi-platform binaries
 
@@ -79,16 +81,16 @@ For power users who need local file access, browser automation, or custom MCP to
 > Make it feel like a real product
 
 **2.1 Agent Marketplace**
-- [ ] Skill discovery + search + tags
-- [ ] One-click run from marketplace
+- [x] Skill discovery + search + tags
+- [x] One-click run from marketplace
 - [ ] Community submissions (PR-based)
 - [ ] Ratings and usage stats
 - [ ] Skill versioning
 
 **2.2 IM Integrations**
-- [ ] Discord channel
-- [ ] Slack channel
-- [ ] 飞书 channel
+- [x] Discord channel
+- [x] Slack channel
+- [x] 飞书 channel
 - [ ] WeChat channel
 - [ ] IM ↔ user account binding
 - [ ] Per-IM session management

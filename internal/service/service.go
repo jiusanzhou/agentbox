@@ -37,6 +37,7 @@ import (
 
 	// register channel implementations
 	_ "go.zoe.im/agentbox/internal/channel/discord"
+	_ "go.zoe.im/agentbox/internal/channel/feishu"
 	_ "go.zoe.im/agentbox/internal/channel/slack"
 	_ "go.zoe.im/agentbox/internal/channel/telegram"
 	_ "go.zoe.im/agentbox/internal/channel/wecom"
@@ -224,6 +225,20 @@ func New(cfg *config.Config) (*Service, error) {
 	// Webhook endpoint for integrations (no auth required — verified by HMAC)
 	mux.HandleFunc("POST /api/v1/hook/{id}", svc.integrations.HandleWebhook)
 
+	// GitHub OAuth endpoints (raw HTTP, not via talk)
+	if cfg.Auth.GitHubClientID != "" {
+		ghCfg := auth.GitHubConfig{
+			ClientID:     cfg.Auth.GitHubClientID,
+			ClientSecret: cfg.Auth.GitHubClientSecret,
+			CallbackURL:  cfg.Auth.GitHubCallbackURL,
+		}
+		mux.HandleFunc("GET /api/v1/auth/github", authInst.HandleGitHubLogin(ghCfg))
+		mux.HandleFunc("GET /api/v1/auth/github/callback", authInst.HandleGitHubCallback(ghCfg))
+	}
+
+	// Skills endpoint
+	mux.HandleFunc("GET /api/v1/skills", svc.ListSkills)
+
 	// Register endpoints via talk reflection
 	if err := server.Register(svc); err != nil {
 		return nil, fmt.Errorf("register endpoints: %w", err)
@@ -270,6 +285,9 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.auth != nil {
 		handler = s.auth.Middleware(handler)
 	}
+
+	// CORS middleware
+	handler = corsMiddleware(s.cfg.CORS)(handler)
 
 	// Rate limiting middleware
 	s.limiter = ratelimit.New(s.cfg.RateLimit)
@@ -510,6 +528,7 @@ func (s *Service) TalkAnnotations() map[string]string {
 		"UpdateIntegration": "@talk skip",
 		"DeleteIntegration": "@talk skip",
 		"TestIntegration":   "@talk skip",
+		"ListSkills":        "@talk skip",
 	}
 }
 
@@ -959,4 +978,102 @@ func (s *Service) CreateAuthApikey(ctx context.Context) (*APIKeyResponse, error)
 	}
 
 	return &APIKeyResponse{APIKey: key}, nil
+}
+
+// --- CORS middleware ---
+
+func corsMiddleware(cfg config.CORSConfig) func(http.Handler) http.Handler {
+	origins := cfg.AllowedOrigins
+	if len(origins) == 0 {
+		origins = []string{"*"}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			allowed := origins[0] // default
+			for _, o := range origins {
+				if o == "*" || o == origin {
+					allowed = o
+					break
+				}
+			}
+
+			w.Header().Set("Access-Control-Allow-Origin", allowed)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, x-base-url, x-model")
+			if cfg.AllowCredentials {
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// --- Skills endpoint ---
+
+type SkillResponse struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
+	AgentFile   string `json:"agent_file"`
+}
+
+var defaultSkills = []SkillResponse{
+	{ID: "code-review", Name: "Code Review", Description: "Analyze code for bugs, security issues, and best practices", Category: "Development", AgentFile: "You are a code review assistant. Analyze the provided code for bugs, security vulnerabilities, and suggest improvements following best practices."},
+	{ID: "web-scraper", Name: "Web Scraper", Description: "Extract structured data from websites", Category: "Data", AgentFile: "You are a web scraping assistant. Help the user extract structured data from websites. Write scripts to collect and format data."},
+	{ID: "sql-assistant", Name: "SQL Assistant", Description: "Write and optimize SQL queries", Category: "Data", AgentFile: "You are a SQL expert. Help write, optimize, and debug SQL queries. Explain query plans and suggest indexes."},
+	{ID: "doc-writer", Name: "Doc Writer", Description: "Generate documentation from code or specs", Category: "Writing", AgentFile: "You are a technical documentation writer. Generate clear, comprehensive documentation from code, APIs, or specifications."},
+	{ID: "test-generator", Name: "Test Generator", Description: "Generate unit and integration tests for your code", Category: "Development", AgentFile: "You are a test generation assistant. Analyze code and generate comprehensive unit and integration tests with good coverage."},
+	{ID: "devops-helper", Name: "DevOps Helper", Description: "Docker, K8s configs, CI/CD pipelines", Category: "Infrastructure", AgentFile: "You are a DevOps assistant. Help with Docker, Kubernetes configurations, CI/CD pipelines, and infrastructure automation."},
+	{ID: "api-designer", Name: "API Designer", Description: "Design RESTful or GraphQL API schemas", Category: "Development", AgentFile: "You are an API design assistant. Help design RESTful or GraphQL APIs with proper resource modeling, authentication, and documentation."},
+	{ID: "data-analyst", Name: "Data Analyst", Description: "Analyze datasets and generate insights", Category: "Data", AgentFile: "You are a data analysis assistant. Analyze datasets, generate visualizations, and provide statistical insights and summaries."},
+	{ID: "shell-assistant", Name: "Shell Assistant", Description: "Write bash scripts and CLI commands", Category: "Infrastructure", AgentFile: "You are a shell scripting assistant. Help write bash scripts, CLI commands, and automate system administration tasks."},
+}
+
+// ListSkills handles GET /api/v1/skills
+func (s *Service) ListSkills(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(defaultSkills)
+}
+
+// --- Request validation helper ---
+
+// ValidationError represents a structured validation error response.
+type ValidationError struct {
+	Error  string            `json:"error"`
+	Fields map[string]string `json:"fields,omitempty"`
+}
+
+// validateRequiredFields checks that required JSON fields are present and non-empty.
+// Returns nil if valid, or writes a 400 response and returns an error.
+func validateRequiredFields(w http.ResponseWriter, body map[string]interface{}, fields ...string) bool {
+	missing := make(map[string]string)
+	for _, f := range fields {
+		v, ok := body[f]
+		if !ok {
+			missing[f] = "field is required"
+			continue
+		}
+		if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
+			missing[f] = "field must not be empty"
+		}
+	}
+	if len(missing) > 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(ValidationError{
+			Error:  "validation failed",
+			Fields: missing,
+		})
+		return false
+	}
+	return true
 }

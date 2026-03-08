@@ -83,9 +83,10 @@ func migrate(db *sql.DB) error {
 			email      TEXT UNIQUE NOT NULL,
 			name       TEXT NOT NULL DEFAULT '',
 			avatar     TEXT DEFAULT '',
-			password   TEXT NOT NULL,
+			password   TEXT NOT NULL DEFAULT '',
 			plan       TEXT NOT NULL DEFAULT 'free',
 			api_key    TEXT DEFAULT '',
+			github_id  TEXT DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
@@ -98,6 +99,9 @@ func migrate(db *sql.DB) error {
 
 	// Add user_id column to existing runs table (ignore error if already exists).
 	db.Exec("ALTER TABLE runs ADD COLUMN user_id TEXT DEFAULT ''")
+
+	// Add github_id column to existing users table (ignore error if already exists).
+	db.Exec("ALTER TABLE users ADD COLUMN github_id TEXT DEFAULT ''")
 
 	// Integrations table
 	_, err = db.Exec(`
@@ -268,39 +272,39 @@ func (s *sqliteStore) Healthy(_ context.Context) error {
 
 func (s *sqliteStore) CreateUser(ctx context.Context, user *model.User) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO users (id, email, name, avatar, password, plan, api_key, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO users (id, email, name, avatar, password, plan, api_key, github_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		user.ID, user.Email, user.Name, user.Avatar, user.Password,
-		user.Plan, user.APIKey, user.CreatedAt, user.UpdatedAt,
+		user.Plan, user.APIKey, user.GitHubID, user.CreatedAt, user.UpdatedAt,
 	)
 	return err
 }
 
 func (s *sqliteStore) GetUser(ctx context.Context, id string) (*model.User, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, email, name, avatar, password, plan, api_key, created_at, updated_at FROM users WHERE id = ?`, id,
+		`SELECT id, email, name, avatar, password, plan, api_key, github_id, created_at, updated_at FROM users WHERE id = ?`, id,
 	)
 	return scanUser(row)
 }
 
 func (s *sqliteStore) GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, email, name, avatar, password, plan, api_key, created_at, updated_at FROM users WHERE email = ?`, email,
+		`SELECT id, email, name, avatar, password, plan, api_key, github_id, created_at, updated_at FROM users WHERE email = ?`, email,
 	)
 	return scanUser(row)
 }
 
 func (s *sqliteStore) GetUserByAPIKey(ctx context.Context, apiKeyHash string) (*model.User, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, email, name, avatar, password, plan, api_key, created_at, updated_at FROM users WHERE api_key = ?`, apiKeyHash,
+		`SELECT id, email, name, avatar, password, plan, api_key, github_id, created_at, updated_at FROM users WHERE api_key = ?`, apiKeyHash,
 	)
 	return scanUser(row)
 }
 
 func (s *sqliteStore) UpdateUser(ctx context.Context, user *model.User) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE users SET email = ?, name = ?, avatar = ?, password = ?, plan = ?, api_key = ?, updated_at = ? WHERE id = ?`,
-		user.Email, user.Name, user.Avatar, user.Password, user.Plan, user.APIKey, user.UpdatedAt, user.ID,
+		`UPDATE users SET email = ?, name = ?, avatar = ?, password = ?, plan = ?, api_key = ?, github_id = ?, updated_at = ? WHERE id = ?`,
+		user.Email, user.Name, user.Avatar, user.Password, user.Plan, user.APIKey, user.GitHubID, user.UpdatedAt, user.ID,
 	)
 	return err
 }
@@ -309,7 +313,7 @@ func scanUser(row scannable) (*model.User, error) {
 	var user model.User
 	err := row.Scan(
 		&user.ID, &user.Email, &user.Name, &user.Avatar, &user.Password,
-		&user.Plan, &user.APIKey, &user.CreatedAt, &user.UpdatedAt,
+		&user.Plan, &user.APIKey, &user.GitHubID, &user.CreatedAt, &user.UpdatedAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {

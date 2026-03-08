@@ -30,6 +30,24 @@ type SendOptions struct {
 	ParseMode string // "markdown", "html", ""
 }
 
+// Button represents an inline button attached to a message.
+type Button struct {
+	ID   string // callback data identifier
+	Text string // display label
+}
+
+// Callback represents a button click from a user.
+type Callback struct {
+	ID        string // button ID / callback data
+	ChatID    string
+	UserID    string
+	MessageID string
+	Extra     map[string]string
+}
+
+// CallbackHandler is called for each button click.
+type CallbackHandler func(ctx context.Context, cb *Callback) error
+
 // Handler is called for each incoming message.
 type Handler func(ctx context.Context, msg *Message) error
 
@@ -39,6 +57,16 @@ type Channel interface {
 	Start(ctx context.Context, handler Handler) error
 	Send(ctx context.Context, chatID string, text string, opts *SendOptions) error
 	Stop(ctx context.Context) error
+
+	// EditMessage edits an existing message. Returns error if unsupported.
+	EditMessage(ctx context.Context, chatID string, messageID string, text string, opts *SendOptions) error
+
+	// SendWithButtons sends a message with inline buttons.
+	// Returns the platform message ID.
+	SendWithButtons(ctx context.Context, chatID string, text string, buttons []Button, opts *SendOptions) (string, error)
+
+	// OnCallback registers a handler for button click callbacks.
+	OnCallback(handler CallbackHandler)
 }
 
 // New creates a Channel from config using the factory.

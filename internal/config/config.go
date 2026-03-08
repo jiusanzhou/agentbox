@@ -44,6 +44,9 @@ type Config struct {
 
 	// Rate limiting
 	RateLimit RateLimitConfig `json:"rate_limit,omitempty" yaml:"rate_limit"`
+
+	// CORS settings
+	CORS CORSConfig `json:"cors,omitempty" yaml:"cors"`
 }
 
 // RateLimitConfig holds rate limiting settings.
@@ -61,6 +64,17 @@ func (c *Config) String() string {
 type AuthConfig struct {
 	JWTSecret string `json:"jwt_secret,omitempty" yaml:"jwt_secret" opts:"env=ABOX_JWT_SECRET"`
 	Enabled   bool   `json:"enabled" yaml:"enabled"`
+
+	// GitHub OAuth
+	GitHubClientID     string `json:"github_client_id,omitempty" yaml:"github_client_id" opts:"env=ABOX_GITHUB_CLIENT_ID"`
+	GitHubClientSecret string `json:"github_client_secret,omitempty" yaml:"github_client_secret" opts:"env=ABOX_GITHUB_CLIENT_SECRET"`
+	GitHubCallbackURL  string `json:"github_callback_url,omitempty" yaml:"github_callback_url" opts:"env=ABOX_GITHUB_CALLBACK_URL"`
+}
+
+// CORSConfig holds CORS settings.
+type CORSConfig struct {
+	AllowedOrigins   []string `json:"allowed_origins,omitempty" yaml:"allowed_origins"`
+	AllowCredentials bool     `json:"allow_credentials,omitempty" yaml:"allow_credentials"`
 }
 
 func NewConfig() *Config {

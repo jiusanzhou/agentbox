@@ -35,12 +35,13 @@ type Config struct {
 
 // Discord implements channel.Channel using discordgo WebSocket.
 type Discord struct {
-	cfg     Config
-	session *discordgo.Session
-	handler channel.Handler
-	logger  *slog.Logger
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	cfg       Config
+	session   *discordgo.Session
+	handler   channel.Handler
+	cbHandler channel.CallbackHandler
+	logger    *slog.Logger
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 // New creates a Discord channel.
@@ -120,6 +121,41 @@ func (d *Discord) Start(ctx context.Context, handler channel.Handler) error {
 		}
 	})
 
+	// Handle button interactions.
+	d.session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		if i.Type != discordgo.InteractionMessageComponent {
+			return
+		}
+
+		// Acknowledge the interaction.
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseDeferredMessageUpdate,
+		})
+
+		if d.cbHandler == nil {
+			return
+		}
+
+		userID := ""
+		if i.Member != nil && i.Member.User != nil {
+			userID = i.Member.User.ID
+		} else if i.User != nil {
+			userID = i.User.ID
+		}
+
+		cb := &channel.Callback{
+			ID:        i.MessageComponentData().CustomID,
+			ChatID:    i.ChannelID,
+			UserID:    userID,
+			MessageID: i.Message.ID,
+			Extra:     map[string]string{"channel": "discord"},
+		}
+
+		if err := d.cbHandler(ctx, cb); err != nil {
+			d.logger.Error("handle callback failed", "custom_id", cb.ID, "err", err)
+		}
+	})
+
 	d.session.Identify.Intents = discordgo.IntentsGuildMessages |
 		discordgo.IntentsDirectMessages |
 		discordgo.IntentMessageContent
@@ -152,6 +188,41 @@ func (d *Discord) Send(ctx context.Context, chatID string, text string, opts *ch
 	}
 	_, err := d.session.ChannelMessageSend(chatID, text)
 	return err
+}
+
+// EditMessage edits an existing Discord message.
+func (d *Discord) EditMessage(ctx context.Context, chatID string, messageID string, text string, opts *channel.SendOptions) error {
+	_, err := d.session.ChannelMessageEdit(chatID, messageID, text)
+	return err
+}
+
+// SendWithButtons sends a message with action buttons.
+func (d *Discord) SendWithButtons(ctx context.Context, chatID string, text string, buttons []channel.Button, opts *channel.SendOptions) (string, error) {
+	var actionRow []discordgo.MessageComponent
+	for _, b := range buttons {
+		actionRow = append(actionRow, discordgo.Button{
+			Label:    b.Text,
+			Style:    discordgo.PrimaryButton,
+			CustomID: b.ID,
+		})
+	}
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{Components: actionRow},
+	}
+
+	msg, err := d.session.ChannelMessageSendComplex(chatID, &discordgo.MessageSend{
+		Content:    text,
+		Components: components,
+	})
+	if err != nil {
+		return "", err
+	}
+	return msg.ID, nil
+}
+
+// OnCallback registers a handler for button click callbacks.
+func (d *Discord) OnCallback(handler channel.CallbackHandler) {
+	d.cbHandler = handler
 }
 
 // Stop gracefully closes the Discord connection.

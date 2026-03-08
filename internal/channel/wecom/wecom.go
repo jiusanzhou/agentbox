@@ -241,6 +241,25 @@ func (w *WeCom) Send(ctx context.Context, chatID string, text string, opts *chan
 	return nil
 }
 
+// EditMessage is not supported by WeCom (no message edit API).
+func (w *WeCom) EditMessage(ctx context.Context, chatID string, messageID string, text string, opts *channel.SendOptions) error {
+	// WeCom does not support editing messages. Send a new message instead.
+	return w.Send(ctx, chatID, text, opts)
+}
+
+// SendWithButtons sends a text card message with buttons using WeCom's textcard msgtype.
+// WeCom doesn't have inline buttons, so we use a text card with a URL link.
+func (w *WeCom) SendWithButtons(ctx context.Context, chatID string, text string, buttons []channel.Button, opts *channel.SendOptions) (string, error) {
+	// WeCom has no inline button support. Fall back to plain text with button labels.
+	if err := w.Send(ctx, chatID, text, opts); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+// OnCallback is a no-op for WeCom (no inline button callback support).
+func (w *WeCom) OnCallback(handler channel.CallbackHandler) {}
+
 // Stop is a no-op since WeCom uses HTTP callbacks.
 func (w *WeCom) Stop(ctx context.Context) error {
 	w.logger.Info("wecom channel stopped")

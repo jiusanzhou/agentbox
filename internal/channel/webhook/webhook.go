@@ -209,6 +209,19 @@ func (w *Webhook) Send(ctx context.Context, chatID string, text string, opts *ch
 	return nil
 }
 
+// EditMessage is not supported by the webhook channel.
+func (w *Webhook) EditMessage(ctx context.Context, chatID string, messageID string, text string, opts *channel.SendOptions) error {
+	return nil
+}
+
+// SendWithButtons is not supported by the webhook channel. Falls back to plain text.
+func (w *Webhook) SendWithButtons(ctx context.Context, chatID string, text string, buttons []channel.Button, opts *channel.SendOptions) (string, error) {
+	return "", w.Send(ctx, chatID, text, opts)
+}
+
+// OnCallback is a no-op for the webhook channel.
+func (w *Webhook) OnCallback(handler channel.CallbackHandler) {}
+
 // Stop is a no-op for the webhook channel.
 func (w *Webhook) Stop(ctx context.Context) error {
 	w.logger.Info("webhook channel stopped")
