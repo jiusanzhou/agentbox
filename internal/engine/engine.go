@@ -18,8 +18,15 @@ type Engine struct {
 	executor executor.Executor
 	logger   *slog.Logger
 
+	// Optional tunnel executor for user-local execution via tunnel.
+	tunnelExec executor.Executor
+
 	mu     sync.Mutex
 	active map[string]context.CancelFunc
+
+	// Track which executor owns each session.
+	sessExecMu sync.RWMutex
+	sessExec   map[string]executor.Executor
 }
 
 func New(s store.Store, e executor.Executor, logger *slog.Logger) *Engine {
@@ -31,7 +38,13 @@ func New(s store.Store, e executor.Executor, logger *slog.Logger) *Engine {
 		executor: e,
 		logger:   logger,
 		active:   make(map[string]context.CancelFunc),
+		sessExec: make(map[string]executor.Executor),
 	}
+}
+
+// SetTunnelExecutor sets the optional tunnel executor for user-local execution.
+func (e *Engine) SetTunnelExecutor(exec executor.Executor) {
+	e.tunnelExec = exec
 }
 
 // Submit creates a new run and starts execution.
@@ -75,6 +88,7 @@ func (e *Engine) execute(run *model.Run) {
 
 	result, err := e.executor.Execute(ctx, &executor.Request{
 		ID:        run.ID,
+		UserID:    run.UserID,
 		AgentFile: run.AgentFile,
 		Image:     run.Config.Image,
 		Env:       run.Config.Env,
@@ -123,6 +137,26 @@ func (e *Engine) List(ctx context.Context, limit, offset int) ([]*model.Run, err
 	return e.store.ListRuns(ctx, limit, offset)
 }
 
+// selectExecutor picks the tunnel executor if available and the run has a UserID,
+// otherwise falls back to the default executor.
+func (e *Engine) selectExecutor(run *model.Run) executor.Executor {
+	if e.tunnelExec != nil && run.UserID != "" {
+		return e.tunnelExec
+	}
+	return e.executor
+}
+
+// getSessionExecutor returns the executor that owns a session, defaulting to the main one.
+func (e *Engine) getSessionExecutor(id string) executor.Executor {
+	e.sessExecMu.RLock()
+	exec, ok := e.sessExec[id]
+	e.sessExecMu.RUnlock()
+	if ok {
+		return exec
+	}
+	return e.executor
+}
+
 // StartSession creates and starts a persistent session container.
 func (e *Engine) StartSession(ctx context.Context, run *model.Run) error {
 	run.Mode = model.RunModeSession
@@ -135,19 +169,35 @@ func (e *Engine) StartSession(ctx context.Context, run *model.Run) error {
 
 	req := &executor.Request{
 		ID:        run.ID,
+		UserID:    run.UserID,
 		AgentFile: run.AgentFile,
 		Image:     run.Config.Image,
 		Runtime:   run.Runtime,
 		Env:       run.Config.Env,
 	}
 
-	_, err := e.executor.StartSession(ctx, req)
+	exec := e.selectExecutor(run)
+
+	_, err := exec.StartSession(ctx, req)
 	if err != nil {
-		run.Status = model.RunStatusFailed
-		run.Result = &model.Result{ExitCode: 1, Error: err.Error()}
-		_ = e.store.UpdateRun(ctx, run)
-		return fmt.Errorf("start session: %w", err)
+		// If tunnel executor fails, fall back to default executor
+		if exec != e.executor {
+			e.logger.Warn("tunnel executor failed, falling back to default", "id", run.ID, "err", err)
+			exec = e.executor
+			_, err = exec.StartSession(ctx, req)
+		}
+		if err != nil {
+			run.Status = model.RunStatusFailed
+			run.Result = &model.Result{ExitCode: 1, Error: err.Error()}
+			_ = e.store.UpdateRun(ctx, run)
+			return fmt.Errorf("start session: %w", err)
+		}
 	}
+
+	// Track which executor owns this session
+	e.sessExecMu.Lock()
+	e.sessExec[run.ID] = exec
+	e.sessExecMu.Unlock()
 
 	now := time.Now()
 	run.Status = model.RunStatusRunning
@@ -171,7 +221,7 @@ func (e *Engine) SendMessage(ctx context.Context, runID string, message string) 
 		return "", fmt.Errorf("session %s is not running (status: %s)", runID, run.Status)
 	}
 
-	resp, err := e.executor.SendMessage(ctx, runID, message)
+	resp, err := e.getSessionExecutor(runID).SendMessage(ctx, runID, message)
 	if err != nil {
 		return "", err
 	}
@@ -193,9 +243,14 @@ func (e *Engine) StopSession(ctx context.Context, runID string) error {
 		return fmt.Errorf("run %s is not a session", runID)
 	}
 
-	if err := e.executor.StopSession(ctx, runID); err != nil {
+	if err := e.getSessionExecutor(runID).StopSession(ctx, runID); err != nil {
 		e.logger.Error("stop session failed", "id", runID, "err", err)
 	}
+
+	// Clean up session executor tracking
+	e.sessExecMu.Lock()
+	delete(e.sessExec, runID)
+	e.sessExecMu.Unlock()
 
 	now := time.Now()
 	run.Status = model.RunStatusCompleted
@@ -218,7 +273,7 @@ func (e *Engine) SendMessageStream(ctx context.Context, runID string, message st
 	if run.Status != model.RunStatusRunning {
 		return "", fmt.Errorf("session %s is not running (status: %s)", runID, run.Status)
 	}
-	resp, err := e.executor.SendMessageStream(ctx, runID, message, onToken)
+	resp, err := e.getSessionExecutor(runID).SendMessageStream(ctx, runID, message, onToken)
 	if err != nil {
 		return "", err
 	}
@@ -300,10 +355,10 @@ func (e *Engine) RecoverSessions(ctx context.Context) error {
 
 // UploadFile copies a file into a running session container.
 func (e *Engine) UploadFile(ctx context.Context, runID string, filename string, data []byte) error {
-	return e.executor.UploadFile(ctx, runID, filename, data)
+	return e.getSessionExecutor(runID).UploadFile(ctx, runID, filename, data)
 }
 
 // StreamLogs streams container logs line by line.
 func (e *Engine) StreamLogs(ctx context.Context, runID string) (<-chan string, error) {
-	return e.executor.StreamLogs(ctx, runID)
+	return e.getSessionExecutor(runID).StreamLogs(ctx, runID)
 }

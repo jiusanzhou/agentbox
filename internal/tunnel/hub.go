@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,9 @@ var upgrader = websocket.Upgrader{
 }
 
 const forwardTimeout = 30 * time.Second
+
+// execTimeout is the maximum time to wait for an exec session to complete.
+const execTimeout = 10 * time.Minute
 
 // TokenValidator validates an auth token and returns the user ID.
 type TokenValidator func(token string) (userID string, err error)
@@ -30,11 +34,12 @@ type Hub struct {
 
 // ClientConn represents a connected tunnel client.
 type ClientConn struct {
-	UserID  string
-	Conn    *websocket.Conn
-	Caps    []string
-	pending map[string]chan *TunnelResponse
-	mu      sync.Mutex
+	UserID      string
+	Conn        *websocket.Conn
+	Caps        []string
+	pending     map[string]chan *TunnelResponse
+	execStreams map[string]chan *ExecStreamMsg
+	mu          sync.Mutex
 }
 
 func NewHub(logger *slog.Logger, validate TokenValidator) *Hub {
@@ -82,10 +87,11 @@ func (h *Hub) HandleConnect(w http.ResponseWriter, r *http.Request) {
 
 	// Register client
 	client := &ClientConn{
-		UserID:  userID,
-		Conn:    conn,
-		Caps:    hello.Capabilities,
-		pending: make(map[string]chan *TunnelResponse),
+		UserID:      userID,
+		Conn:        conn,
+		Caps:        hello.Capabilities,
+		pending:     make(map[string]chan *TunnelResponse),
+		execStreams: make(map[string]chan *ExecStreamMsg),
 	}
 
 	h.mu.Lock()
@@ -101,13 +107,22 @@ func (h *Hub) HandleConnect(w http.ResponseWriter, r *http.Request) {
 
 	conn.WriteJSON(HelloResponse{Type: "welcome", UserID: userID})
 
-	// Read loop: receives TunnelResponse messages from client
+	// Read loop: receives TunnelResponse and ExecStreamMsg messages from client
 	defer func() {
 		h.mu.Lock()
 		if h.clients[userID] == client {
 			delete(h.clients, userID)
 		}
 		h.mu.Unlock()
+
+		// Close all pending exec streams on disconnect
+		client.mu.Lock()
+		for id, ch := range client.execStreams {
+			close(ch)
+			delete(client.execStreams, id)
+		}
+		client.mu.Unlock()
+
 		h.logger.Info("tunnel client disconnected", "user", userID)
 	}()
 
@@ -117,21 +132,55 @@ func (h *Hub) HandleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		var resp TunnelResponse
-		if err := json.Unmarshal(msg, &resp); err != nil {
-			h.logger.Warn("invalid tunnel response", "err", err)
+		// Peek at the "type" field to determine message kind
+		var peek struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(msg, &peek); err != nil {
+			h.logger.Warn("invalid tunnel message", "err", err)
 			continue
 		}
 
-		client.mu.Lock()
-		ch, ok := client.pending[resp.ID]
-		if ok {
-			delete(client.pending, resp.ID)
-		}
-		client.mu.Unlock()
+		if strings.HasPrefix(peek.Type, "exec.") {
+			// Exec stream message
+			var execMsg ExecStreamMsg
+			if err := json.Unmarshal(msg, &execMsg); err != nil {
+				h.logger.Warn("invalid exec stream msg", "err", err)
+				continue
+			}
 
-		if ok {
-			ch <- &resp
+			client.mu.Lock()
+			ch, ok := client.execStreams[execMsg.ID]
+			client.mu.Unlock()
+
+			if ok {
+				ch <- &execMsg
+				// Close channel on terminal messages
+				if execMsg.Type == "exec.done" || execMsg.Type == "exec.error" {
+					client.mu.Lock()
+					delete(client.execStreams, execMsg.ID)
+					client.mu.Unlock()
+					close(ch)
+				}
+			}
+		} else {
+			// HTTP tunnel response (default)
+			var resp TunnelResponse
+			if err := json.Unmarshal(msg, &resp); err != nil {
+				h.logger.Warn("invalid tunnel response", "err", err)
+				continue
+			}
+
+			client.mu.Lock()
+			ch, ok := client.pending[resp.ID]
+			if ok {
+				delete(client.pending, resp.ID)
+			}
+			client.mu.Unlock()
+
+			if ok {
+				ch <- &resp
+			}
 		}
 	}
 }
@@ -173,6 +222,81 @@ func (h *Hub) Forward(userID string, req *TunnelRequest) (*TunnelResponse, error
 	}
 }
 
+// StartExec sends an exec.start request and returns a channel that receives stream messages.
+func (h *Hub) StartExec(userID string, req *ExecRequest) (<-chan *ExecStreamMsg, error) {
+	h.mu.RLock()
+	client, ok := h.clients[userID]
+	h.mu.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("no tunnel for user %s", userID)
+	}
+
+	ch := make(chan *ExecStreamMsg, 64)
+
+	client.mu.Lock()
+	client.execStreams[req.ID] = ch
+	client.mu.Unlock()
+
+	req.Type = "exec.start"
+
+	client.mu.Lock()
+	err := client.Conn.WriteJSON(req)
+	client.mu.Unlock()
+	if err != nil {
+		client.mu.Lock()
+		delete(client.execStreams, req.ID)
+		client.mu.Unlock()
+		close(ch)
+		return nil, fmt.Errorf("write exec request to tunnel: %w", err)
+	}
+
+	return ch, nil
+}
+
+// SendInput sends stdin data to a running exec process on the client.
+func (h *Hub) SendInput(userID, execID, data string) error {
+	h.mu.RLock()
+	client, ok := h.clients[userID]
+	h.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("no tunnel for user %s", userID)
+	}
+
+	msg := &ExecInputMsg{
+		ID:   execID,
+		Type: "exec.stdin",
+		Data: data,
+	}
+
+	client.mu.Lock()
+	err := client.Conn.WriteJSON(msg)
+	client.mu.Unlock()
+	return err
+}
+
+// StopExec sends a kill signal for a running exec process on the client.
+func (h *Hub) StopExec(userID, execID string) error {
+	h.mu.RLock()
+	client, ok := h.clients[userID]
+	h.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("no tunnel for user %s", userID)
+	}
+
+	msg := &ExecStopMsg{
+		ID:   execID,
+		Type: "exec.stop",
+	}
+
+	client.mu.Lock()
+	err := client.Conn.WriteJSON(msg)
+	client.mu.Unlock()
+	return err
+}
+
 // IsConnected returns true if the user has an active tunnel.
 func (h *Hub) IsConnected(userID string) bool {
 	h.mu.RLock()
@@ -189,4 +313,15 @@ func (h *Hub) GetCapabilities(userID string) []string {
 		return c.Caps
 	}
 	return nil
+}
+
+// HasCapability returns true if the connected client has the given capability.
+func (h *Hub) HasCapability(userID, cap string) bool {
+	caps := h.GetCapabilities(userID)
+	for _, c := range caps {
+		if c == cap {
+			return true
+		}
+	}
+	return false
 }

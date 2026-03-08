@@ -16,6 +16,7 @@ var (
 
 type Request struct {
 	ID        string
+	UserID    string // for tunnel executor routing
 	AgentFile string
 	Image     string
 	Runtime   string

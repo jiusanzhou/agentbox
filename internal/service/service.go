@@ -17,6 +17,7 @@ import (
 	"go.zoe.im/agentbox/internal/config"
 	"go.zoe.im/agentbox/internal/engine"
 	"go.zoe.im/agentbox/internal/executor"
+	tunnelexec "go.zoe.im/agentbox/internal/executor/tunnel"
 	"go.zoe.im/agentbox/internal/integration"
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/agentbox/internal/ratelimit"
@@ -31,6 +32,7 @@ import (
 	_ "go.zoe.im/agentbox/internal/executor/docker"
 	_ "go.zoe.im/agentbox/internal/executor/e2b"
 	_ "go.zoe.im/agentbox/internal/executor/local"
+	_ "go.zoe.im/agentbox/internal/executor/tunnel"
 	_ "go.zoe.im/agentbox/internal/storage/local"
 	_ "go.zoe.im/agentbox/internal/store/memory"
 	_ "go.zoe.im/agentbox/internal/store/sqlite"
@@ -162,6 +164,9 @@ func New(cfg *config.Config) (*Service, error) {
 
 	// Register tunnel WebSocket endpoint on shared mux
 	mux.HandleFunc("GET /api/v1/tunnel", hub.HandleConnect)
+
+	// Create tunnel executor and attach to engine for user-local execution
+	eng.SetTunnelExecutor(tunnelexec.New(hub))
 
 	svc := &Service{
 		cfg:      cfg,
@@ -393,6 +398,11 @@ func (s *Service) CreateRun(ctx context.Context, req *CreateRunRequest) (*model.
 		run.Config.Timeout = 3600
 	}
 
+	// Set user ID from auth context
+	if user := auth.UserFromContext(ctx); user != nil {
+		run.UserID = user.ID
+	}
+
 	if err := s.engine.Submit(ctx, run); err != nil {
 		return nil, talk.NewError(talk.Internal, err.Error())
 	}
@@ -444,6 +454,11 @@ func (s *Service) CreateSession(ctx context.Context, req *CreateSessionRequest) 
 		Runtime:   req.Runtime,
 		AgentFile: req.AgentFile,
 		Config:    req.Config,
+	}
+
+	// Set user ID from auth context
+	if user := auth.UserFromContext(ctx); user != nil {
+		run.UserID = user.ID
 	}
 
 	// Inject API provider settings from request headers (via context middleware)
