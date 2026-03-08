@@ -70,6 +70,19 @@ func New(cfg Config) (executor.Executor, error) {
 
 func (e *localExecutor) Execute(ctx context.Context, req *executor.Request) (*executor.Response, error) {
 	rt := e.getRuntime(req.Runtime)
+
+	// Check runtime availability before executing
+	if bin := rt.BinaryName(); bin != "" {
+		status := runtime.CheckRuntime(rt.Name())
+		if !status.Available {
+			hint := ""
+			if cmd := rt.InstallCommand(); cmd != "" {
+				hint = fmt.Sprintf(". Install with: %s", cmd)
+			}
+			return nil, fmt.Errorf("runtime %q not found: %s is not installed%s", rt.Name(), bin, hint)
+		}
+	}
+
 	dir := filepath.Join(e.workDir, req.ID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create session dir: %w", err)
@@ -133,6 +146,19 @@ func (e *localExecutor) Stop(ctx context.Context, id string) error {
 
 func (e *localExecutor) StartSession(_ context.Context, req *executor.Request) (string, error) {
 	rt := e.getRuntime(req.Runtime)
+
+	// Check runtime availability before starting session
+	if bin := rt.BinaryName(); bin != "" {
+		status := runtime.CheckRuntime(rt.Name())
+		if !status.Available {
+			hint := ""
+			if cmd := rt.InstallCommand(); cmd != "" {
+				hint = fmt.Sprintf(". Install with: %s", cmd)
+			}
+			return "", fmt.Errorf("runtime %q not found: %s is not installed%s", rt.Name(), bin, hint)
+		}
+	}
+
 	dir := filepath.Join(e.workDir, req.ID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("create session dir: %w", err)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth";
 import { clientFetch } from "@/lib/api";
 
@@ -29,10 +36,13 @@ interface ChannelInfo {
   config: Record<string, string>;
 }
 
-interface RuntimeInfo {
+interface RuntimeStatus {
   name: string;
-  image: string;
-  env_keys: string[];
+  binary_name: string;
+  install_command: string;
+  available: boolean;
+  version?: string;
+  error?: string;
 }
 
 // --- Channel type form fields ---
@@ -69,7 +79,7 @@ export default function SettingsPage() {
 
   // Admin state
   const [adminConfig, setAdminConfig] = useState<SanitizedConfig | null>(null);
-  const [runtimes, setRuntimes] = useState<RuntimeInfo[]>([]);
+  const [runtimeStatuses, setRuntimeStatuses] = useState<RuntimeStatus[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
 
   // Rate limit form
@@ -87,6 +97,14 @@ export default function SettingsPage() {
   const [newChannelFields, setNewChannelFields] = useState<Record<string, string>>({});
   const [channelAdding, setChannelAdding] = useState(false);
 
+  // Install dialog state
+  const [installDialogOpen, setInstallDialogOpen] = useState(false);
+  const [installRuntime, setInstallRuntime] = useState("");
+  const [installOutput, setInstallOutput] = useState<string[]>([]);
+  const [installStatus, setInstallStatus] = useState<"idle" | "running" | "completed" | "failed">("idle");
+  const [installing, setInstalling] = useState<Set<string>>(new Set());
+  const outputEndRef = useRef<HTMLDivElement>(null);
+
   // Load saved AI settings from localStorage
   useEffect(() => {
     const saved = localStorage.getItem("abox_ai_settings");
@@ -99,6 +117,11 @@ export default function SettingsPage() {
       } catch {}
     }
   }, []);
+
+  // Auto-scroll install output
+  useEffect(() => {
+    outputEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [installOutput]);
 
   const generateApiKey = async () => {
     setGenerating(true);
@@ -136,7 +159,7 @@ export default function SettingsPage() {
     try {
       const [cfgRes, rtRes] = await Promise.all([
         clientFetch("/api/admin/config"),
-        clientFetch("/api/admin/runtimes"),
+        clientFetch("/api/admin/runtimes/status"),
       ]);
       if (cfgRes.ok) {
         const cfg: SanitizedConfig = await cfgRes.json();
@@ -148,7 +171,7 @@ export default function SettingsPage() {
       }
       if (rtRes.ok) {
         const rt = await rtRes.json();
-        setRuntimes(Array.isArray(rt) ? rt : []);
+        setRuntimeStatuses(Array.isArray(rt) ? rt : []);
       }
     } catch {
       // ignore
@@ -215,6 +238,89 @@ export default function SettingsPage() {
       }
     } catch {}
     setChannelAdding(false);
+  };
+
+  // --- Install runtime ---
+
+  const startInstall = async (name: string) => {
+    setInstallRuntime(name);
+    setInstallOutput([]);
+    setInstallStatus("running");
+    setInstallDialogOpen(true);
+    setInstalling((prev) => new Set(prev).add(name));
+
+    try {
+      const res = await clientFetch("/api/admin/runtimes/install", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setInstallStatus("failed");
+        setInstallOutput([data.error || "Failed to start install"]);
+        setInstalling((prev) => {
+          const next = new Set(prev);
+          next.delete(name);
+          return next;
+        });
+        return;
+      }
+
+      // Start SSE stream for output
+      const token = localStorage.getItem("abox_token");
+      const eventSource = new EventSource(
+        `/api/admin/runtimes/install/${encodeURIComponent(name)}${token ? `?token=${token}` : ""}`
+      );
+
+      eventSource.onmessage = (event) => {
+        setInstallOutput((prev) => [...prev, event.data]);
+      };
+
+      eventSource.addEventListener("done", (event: Event) => {
+        const msgEvent = event as MessageEvent;
+        try {
+          const data = JSON.parse(msgEvent.data);
+          setInstallStatus(data.status === "completed" ? "completed" : "failed");
+          if (data.error) {
+            setInstallOutput((prev) => [...prev, `Error: ${data.error}`]);
+          }
+        } catch {
+          setInstallStatus("completed");
+        }
+        eventSource.close();
+        setInstalling((prev) => {
+          const next = new Set(prev);
+          next.delete(name);
+          return next;
+        });
+        // Refresh runtime statuses
+        clientFetch("/api/admin/runtimes/status").then(async (resp) => {
+          if (resp.ok) {
+            const rt = await resp.json();
+            setRuntimeStatuses(Array.isArray(rt) ? rt : []);
+          }
+        });
+      });
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        setInstallStatus("failed");
+        setInstalling((prev) => {
+          const next = new Set(prev);
+          next.delete(name);
+          return next;
+        });
+      };
+    } catch {
+      setInstallStatus("failed");
+      setInstallOutput(["Failed to connect to server"]);
+      setInstalling((prev) => {
+        const next = new Set(prev);
+        next.delete(name);
+        return next;
+      });
+    }
   };
 
   // --- Render ---
@@ -497,18 +603,40 @@ export default function SettingsPage() {
                 <CardTitle className="text-base">Agent Runtimes</CardTitle>
               </CardHeader>
               <CardContent>
-                {runtimes.length > 0 ? (
+                {runtimeStatuses.length > 0 ? (
                   <div className="space-y-2">
-                    {runtimes.map((rt) => (
-                      <div key={rt.name} className="flex items-center gap-2 py-1.5">
+                    {runtimeStatuses.map((rt) => (
+                      <div key={rt.name} className="flex items-center gap-2 py-2 px-3 rounded-md bg-muted/50">
+                        <span
+                          className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
+                            rt.available ? "bg-green-500" : "bg-red-500"
+                          }`}
+                        />
                         <Badge variant="outline">{rt.name}</Badge>
-                        <span className="text-sm text-muted-foreground">
-                          {rt.image || "custom"}
-                        </span>
-                        {rt.env_keys?.length > 0 && (
-                          <span className="text-xs text-muted-foreground">
-                            {rt.env_keys.join(", ")}
+                        {rt.available && rt.version && (
+                          <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                            {rt.version}
                           </span>
+                        )}
+                        {!rt.available && rt.binary_name && (
+                          <span className="text-xs text-muted-foreground">
+                            {rt.binary_name} not found
+                          </span>
+                        )}
+                        <span className="flex-1" />
+                        {!rt.available && rt.install_command && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            disabled={installing.has(rt.name)}
+                            onClick={() => startInstall(rt.name)}
+                          >
+                            {installing.has(rt.name) ? "Installing..." : "Install"}
+                          </Button>
+                        )}
+                        {!rt.available && !rt.install_command && rt.binary_name && (
+                          <span className="text-xs text-muted-foreground italic">manual install</span>
                         )}
                       </div>
                     ))}
@@ -521,6 +649,37 @@ export default function SettingsPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Install Output Dialog */}
+      <Dialog open={installDialogOpen} onOpenChange={setInstallDialogOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>
+              Installing {installRuntime}
+              {installStatus === "completed" && (
+                <Badge variant="secondary" className="ml-2">Done</Badge>
+              )}
+              {installStatus === "failed" && (
+                <Badge variant="destructive" className="ml-2">Failed</Badge>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="bg-black rounded-md p-3 max-h-[300px] overflow-y-auto font-mono text-xs text-green-400">
+            {installOutput.length === 0 && installStatus === "running" && (
+              <p className="text-muted-foreground">Starting install...</p>
+            )}
+            {installOutput.map((line, i) => (
+              <div key={i} className="whitespace-pre-wrap break-all">{line}</div>
+            ))}
+            <div ref={outputEndRef} />
+          </div>
+          <DialogFooter showCloseButton>
+            {installStatus === "completed" && (
+              <p className="text-sm text-green-600 mr-auto">Install completed successfully.</p>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

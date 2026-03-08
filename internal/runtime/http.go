@@ -33,3 +33,5 @@ func (h *HTTPAdapter) ParseStreamLine(line string) (string, string, bool) {
 
 func (h *HTTPAdapter) EnvKeys() []string       { return []string{"ABOX_HTTP_ENDPOINT"} }
 func (h *HTTPAdapter) SetupCommands() []string { return nil }
+func (h *HTTPAdapter) BinaryName() string      { return "" }
+func (h *HTTPAdapter) InstallCommand() string  { return "" }

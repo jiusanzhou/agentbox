@@ -26,3 +26,5 @@ func (c *OpenCode) EnvKeys() []string {
 }
 
 func (c *OpenCode) SetupCommands() []string { return nil }
+func (c *OpenCode) BinaryName() string      { return "opencode" }
+func (c *OpenCode) InstallCommand() string  { return "npm install -g opencode-ai" }

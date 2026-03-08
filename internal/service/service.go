@@ -94,6 +94,7 @@ type Service struct {
 	mux          *http.ServeMux
 	limiter      *ratelimit.Limiter
 	store        store.Store
+	installs     *installManager
 	logger       *slog.Logger
 }
 
@@ -163,15 +164,16 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("GET /api/v1/tunnel", hub.HandleConnect)
 
 	svc := &Service{
-		cfg:     cfg,
-		engine:  eng,
-		storage: st,
-		server:  server,
-		auth:    authInst,
-		hub:     hub,
-		mux:     mux,
-		store:   s,
-		logger:  logger,
+		cfg:      cfg,
+		engine:   eng,
+		storage:  st,
+		server:   server,
+		auth:     authInst,
+		hub:      hub,
+		mux:      mux,
+		store:    s,
+		installs: newInstallManager(),
+		logger:   logger,
 	}
 
 	// Register SSE streaming endpoint (raw HTTP, not via talk)
@@ -210,6 +212,9 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("POST /api/v1/admin/config/channels", svc.AddChannel)
 	mux.HandleFunc("DELETE /api/v1/admin/config/channels/{index}", svc.RemoveChannel)
 	mux.HandleFunc("GET /api/v1/admin/runtimes", svc.ListRuntimes)
+	mux.HandleFunc("GET /api/v1/admin/runtimes/status", svc.GetRuntimesStatus)
+	mux.HandleFunc("POST /api/v1/admin/runtimes/install", svc.InstallRuntime)
+	mux.HandleFunc("GET /api/v1/admin/runtimes/install/{name}", svc.StreamInstallOutput)
 
 	// Create integration manager for per-user IM channel bindings
 	svc.integrations = integration.NewManager(s, eng, mux, logger)

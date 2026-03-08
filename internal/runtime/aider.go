@@ -23,3 +23,5 @@ func (a *Aider) ParseStreamLine(line string) (string, string, bool) {
 
 func (a *Aider) EnvKeys() []string       { return []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"} }
 func (a *Aider) SetupCommands() []string { return nil }
+func (a *Aider) BinaryName() string      { return "aider" }
+func (a *Aider) InstallCommand() string  { return "pip install aider-chat" }

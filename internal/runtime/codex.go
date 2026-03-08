@@ -58,3 +58,5 @@ func (c *OpenAICodex) ParseStreamLine(line string) (string, string, bool) {
 
 func (c *OpenAICodex) EnvKeys() []string       { return []string{"OPENAI_API_KEY"} }
 func (c *OpenAICodex) SetupCommands() []string { return nil }
+func (c *OpenAICodex) BinaryName() string      { return "codex" }
+func (c *OpenAICodex) InstallCommand() string  { return "npm install -g @openai/codex" }

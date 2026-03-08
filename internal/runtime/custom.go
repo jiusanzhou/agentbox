@@ -30,3 +30,5 @@ func (c *Custom) ParseStreamLine(line string) (string, string, bool) {
 
 func (c *Custom) EnvKeys() []string       { return nil }
 func (c *Custom) SetupCommands() []string { return nil }
+func (c *Custom) BinaryName() string      { return "" }
+func (c *Custom) InstallCommand() string  { return "" }

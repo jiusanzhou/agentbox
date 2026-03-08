@@ -23,3 +23,5 @@ func (o *OpenHands) ParseStreamLine(line string) (string, string, bool) {
 
 func (o *OpenHands) EnvKeys() []string       { return []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY"} }
 func (o *OpenHands) SetupCommands() []string { return nil }
+func (o *OpenHands) BinaryName() string      { return "python" }
+func (o *OpenHands) InstallCommand() string  { return "pip install openhands" }

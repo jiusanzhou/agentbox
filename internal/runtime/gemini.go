@@ -24,3 +24,5 @@ func (c *GeminiCLI) ParseStreamLine(line string) (string, string, bool) {
 
 func (c *GeminiCLI) EnvKeys() []string       { return []string{"GEMINI_API_KEY"} }
 func (c *GeminiCLI) SetupCommands() []string { return nil }
+func (c *GeminiCLI) BinaryName() string      { return "gemini" }
+func (c *GeminiCLI) InstallCommand() string  { return "npm install -g @google/gemini-cli" }

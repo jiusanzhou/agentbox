@@ -26,6 +26,8 @@ func (c *ClaudeCode) BuildExecArgs(message string, continued bool) []string {
 
 func (c *ClaudeCode) EnvKeys() []string       { return []string{"ANTHROPIC_API_KEY"} }
 func (c *ClaudeCode) SetupCommands() []string { return nil }
+func (c *ClaudeCode) BinaryName() string      { return "claude" }
+func (c *ClaudeCode) InstallCommand() string  { return "npm install -g @anthropic-ai/claude-code" }
 
 func (c *ClaudeCode) ParseStreamLine(line string) (string, string, bool) {
 	var event struct {

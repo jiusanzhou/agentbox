@@ -23,3 +23,5 @@ func (c *CursorCLI) ParseStreamLine(line string) (string, string, bool) {
 
 func (c *CursorCLI) EnvKeys() []string       { return []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY"} }
 func (c *CursorCLI) SetupCommands() []string { return nil }
+func (c *CursorCLI) BinaryName() string      { return "cursor" }
+func (c *CursorCLI) InstallCommand() string  { return "" }

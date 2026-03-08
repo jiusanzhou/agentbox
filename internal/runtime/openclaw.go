@@ -91,3 +91,6 @@ func (o *OpenClaw) SetupCommands() []string {
 		`which curl > /dev/null 2>&1 || (apk add --no-cache curl 2>/dev/null || apt-get install -y curl 2>/dev/null)`,
 	}
 }
+
+func (o *OpenClaw) BinaryName() string     { return "openclaw" }
+func (o *OpenClaw) InstallCommand() string { return "npm install -g openclaw" }

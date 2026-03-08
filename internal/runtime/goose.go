@@ -23,3 +23,5 @@ func (g *Goose) ParseStreamLine(line string) (string, string, bool) {
 
 func (g *Goose) EnvKeys() []string       { return []string{"OPENAI_API_KEY", "ANTHROPIC_API_KEY"} }
 func (g *Goose) SetupCommands() []string { return nil }
+func (g *Goose) BinaryName() string      { return "goose" }
+func (g *Goose) InstallCommand() string  { return "pip install goose-ai" }
