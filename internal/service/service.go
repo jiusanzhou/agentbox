@@ -255,6 +255,13 @@ func New(cfg *config.Config) (*Service, error) {
 	// Skills endpoint
 	mux.HandleFunc("GET /api/v1/skills", svc.ListSkills)
 
+	// Agent registry endpoints
+	mux.HandleFunc("GET /api/v1/registry/agents", svc.ListRegistryAgents)
+	mux.HandleFunc("GET /api/v1/registry/agents/{id}", svc.GetRegistryAgent)
+	mux.HandleFunc("POST /api/v1/registry/agents", svc.CreateRegistryAgent)
+	mux.HandleFunc("PATCH /api/v1/registry/agents/{id}", svc.UpdateRegistryAgent)
+	mux.HandleFunc("POST /api/v1/registry/agents/{id}/hire", svc.HireRegistryAgent)
+
 	// Register endpoints via talk reflection
 	if err := server.Register(svc); err != nil {
 		return nil, fmt.Errorf("register endpoints: %w", err)
@@ -645,6 +652,11 @@ func (s *Service) TalkAnnotations() map[string]string {
 		"DeleteIntegration": "@talk skip",
 		"TestIntegration":   "@talk skip",
 		"ListSkills":        "@talk skip",
+		"ListRegistryAgents":  "@talk skip",
+		"GetRegistryAgent":    "@talk skip",
+		"CreateRegistryAgent": "@talk skip",
+		"UpdateRegistryAgent": "@talk skip",
+		"HireRegistryAgent":   "@talk skip",
 	}
 }
 
