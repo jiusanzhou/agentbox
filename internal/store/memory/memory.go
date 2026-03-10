@@ -21,6 +21,7 @@ type memoryStore struct {
 	runs         map[string]*model.Run
 	users        map[string]*model.User
 	integrations map[string]*model.Integration
+	agentDNAs    map[string]*model.AgentDNA
 }
 
 func New() store.Store {
@@ -28,6 +29,7 @@ func New() store.Store {
 		runs:         make(map[string]*model.Run),
 		users:        make(map[string]*model.User),
 		integrations: make(map[string]*model.Integration),
+		agentDNAs:    make(map[string]*model.AgentDNA),
 	}
 }
 
@@ -200,4 +202,99 @@ func (s *memoryStore) ListAllEnabledIntegrations(_ context.Context) ([]*model.In
 		}
 	}
 	return result, nil
+}
+
+// --- AgentDNA methods ---
+
+func (s *memoryStore) CreateAgentDNA(_ context.Context, agent *model.AgentDNA) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.agentDNAs[agent.ID]; exists {
+		return fmt.Errorf("agent %s already exists", agent.ID)
+	}
+	for _, a := range s.agentDNAs {
+		if a.Slug == agent.Slug {
+			return fmt.Errorf("agent with slug %s already exists", agent.Slug)
+		}
+	}
+	s.agentDNAs[agent.ID] = agent
+	return nil
+}
+
+func (s *memoryStore) GetAgentDNA(_ context.Context, id string) (*model.AgentDNA, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	a, ok := s.agentDNAs[id]
+	if !ok {
+		return nil, fmt.Errorf("agent %s not found", id)
+	}
+	return a, nil
+}
+
+func (s *memoryStore) GetAgentDNABySlug(_ context.Context, slug string) (*model.AgentDNA, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, a := range s.agentDNAs {
+		if a.Slug == slug {
+			return a, nil
+		}
+	}
+	return nil, fmt.Errorf("agent with slug %s not found", slug)
+}
+
+func (s *memoryStore) UpdateAgentDNA(_ context.Context, agent *model.AgentDNA) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.agentDNAs[agent.ID]; !exists {
+		return fmt.Errorf("agent %s not found", agent.ID)
+	}
+	s.agentDNAs[agent.ID] = agent
+	return nil
+}
+
+func (s *memoryStore) DeleteAgentDNA(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.agentDNAs, id)
+	return nil
+}
+
+func (s *memoryStore) ListAgentDNAs(_ context.Context, opts model.AgentDNAListOptions) ([]*model.AgentDNA, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*model.AgentDNA
+	for _, a := range s.agentDNAs {
+		if opts.Status != "" && a.Status != opts.Status {
+			continue
+		}
+		if opts.Runtime != "" && a.Manifest != nil && a.Manifest.Runtime != opts.Runtime {
+			continue
+		}
+		result = append(result, a)
+	}
+	// Simple pagination
+	offset := opts.Offset
+	if offset >= len(result) {
+		return nil, nil
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	end := offset + limit
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[offset:end], nil
+}
+
+func (s *memoryStore) IncrementAgentDNADownloads(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.agentDNAs[id]
+	if !ok {
+		return fmt.Errorf("agent %s not found", id)
+	}
+	a.Downloads++
+	return nil
 }

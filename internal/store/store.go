@@ -41,6 +41,15 @@ type Store interface {
 	UpdateIntegration(ctx context.Context, i *model.Integration) error
 	DeleteIntegration(ctx context.Context, id string) error
 	ListAllEnabledIntegrations(ctx context.Context) ([]*model.Integration, error)
+
+	// AgentDNA methods (marketplace registry)
+	CreateAgentDNA(ctx context.Context, agent *model.AgentDNA) error
+	GetAgentDNA(ctx context.Context, id string) (*model.AgentDNA, error)
+	GetAgentDNABySlug(ctx context.Context, slug string) (*model.AgentDNA, error)
+	UpdateAgentDNA(ctx context.Context, agent *model.AgentDNA) error
+	DeleteAgentDNA(ctx context.Context, id string) error
+	ListAgentDNAs(ctx context.Context, opts model.AgentDNAListOptions) ([]*model.AgentDNA, error)
+	IncrementAgentDNADownloads(ctx context.Context, id string) error
 }
 
 // New creates a new Store from a TypedLazyConfig.

@@ -121,6 +121,37 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_integrations_user ON integrations(user_id);
 	`)
 
+	if err != nil {
+		return err
+	}
+
+	// Agent DNA registry table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS agent_dnas (
+			id           TEXT PRIMARY KEY,
+			user_id      TEXT NOT NULL,
+			slug         TEXT UNIQUE NOT NULL,
+			version      TEXT NOT NULL DEFAULT '0.1.0',
+			identity     TEXT NOT NULL DEFAULT '{}',
+			soul         TEXT,
+			tools        TEXT,
+			memory       TEXT,
+			skills       TEXT,
+			manifest     TEXT NOT NULL DEFAULT '{}',
+			repo_url     TEXT DEFAULT '',
+			repo_ref     TEXT DEFAULT '',
+			status       TEXT NOT NULL DEFAULT 'draft',
+			downloads    INTEGER NOT NULL DEFAULT 0,
+			rating       REAL NOT NULL DEFAULT 0,
+			created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			published_at DATETIME
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_dnas_slug ON agent_dnas(slug);
+		CREATE INDEX IF NOT EXISTS idx_agent_dnas_user ON agent_dnas(user_id);
+		CREATE INDEX IF NOT EXISTS idx_agent_dnas_status ON agent_dnas(status);
+	`)
+
 	return err
 }
 
@@ -414,4 +445,239 @@ func scanIntegrationRows(rows *sql.Rows) ([]*model.Integration, error) {
 		result = append(result, &i)
 	}
 	return result, rows.Err()
+}
+
+// --- AgentDNA methods ---
+
+func (s *sqliteStore) CreateAgentDNA(ctx context.Context, agent *model.AgentDNA) error {
+	identityJSON, _ := json.Marshal(agent.Identity)
+	soulJSON := marshalNullable(agent.Soul)
+	manifestJSON, _ := json.Marshal(agent.Manifest)
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO agent_dnas (id, user_id, slug, version, identity, soul, tools, memory, skills, manifest,
+			repo_url, repo_ref, status, downloads, rating, created_at, updated_at, published_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		agent.ID, agent.UserID, agent.Slug, agent.Version,
+		string(identityJSON), soulJSON, nullableJSON(agent.Tools), nullableJSON(agent.Memory), nullableJSON(agent.Skills),
+		string(manifestJSON), agent.RepoURL, agent.RepoRef,
+		string(agent.Status), agent.Downloads, agent.Rating,
+		agent.CreatedAt, agent.UpdatedAt, agent.PublishedAt,
+	)
+	return err
+}
+
+func (s *sqliteStore) GetAgentDNA(ctx context.Context, id string) (*model.AgentDNA, error) {
+	row := s.db.QueryRowContext(ctx, agentDNASelectSQL+` WHERE id = ?`, id)
+	return scanAgentDNA(row)
+}
+
+func (s *sqliteStore) GetAgentDNABySlug(ctx context.Context, slug string) (*model.AgentDNA, error) {
+	row := s.db.QueryRowContext(ctx, agentDNASelectSQL+` WHERE slug = ?`, slug)
+	return scanAgentDNA(row)
+}
+
+func (s *sqliteStore) UpdateAgentDNA(ctx context.Context, agent *model.AgentDNA) error {
+	identityJSON, _ := json.Marshal(agent.Identity)
+	soulJSON := marshalNullable(agent.Soul)
+	manifestJSON, _ := json.Marshal(agent.Manifest)
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE agent_dnas SET user_id = ?, slug = ?, version = ?,
+			identity = ?, soul = ?, tools = ?, memory = ?, skills = ?, manifest = ?,
+			repo_url = ?, repo_ref = ?, status = ?, downloads = ?, rating = ?,
+			updated_at = ?, published_at = ?
+		 WHERE id = ?`,
+		agent.UserID, agent.Slug, agent.Version,
+		string(identityJSON), soulJSON, nullableJSON(agent.Tools), nullableJSON(agent.Memory), nullableJSON(agent.Skills),
+		string(manifestJSON), agent.RepoURL, agent.RepoRef,
+		string(agent.Status), agent.Downloads, agent.Rating,
+		agent.UpdatedAt, agent.PublishedAt, agent.ID,
+	)
+	return err
+}
+
+func (s *sqliteStore) DeleteAgentDNA(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM agent_dnas WHERE id = ?`, id)
+	return err
+}
+
+func (s *sqliteStore) ListAgentDNAs(ctx context.Context, opts model.AgentDNAListOptions) ([]*model.AgentDNA, error) {
+	query := agentDNASelectSQL + ` WHERE 1=1`
+	var args []any
+
+	if opts.Status != "" {
+		query += ` AND status = ?`
+		args = append(args, string(opts.Status))
+	}
+	if opts.Runtime != "" {
+		query += ` AND json_extract(manifest, '$.runtime') = ?`
+		args = append(args, opts.Runtime)
+	}
+	if opts.Tag != "" {
+		query += ` AND EXISTS (SELECT 1 FROM json_each(json_extract(manifest, '$.tags')) WHERE value = ?)`
+		args = append(args, opts.Tag)
+	}
+	if opts.Query != "" {
+		query += ` AND (slug LIKE ? OR json_extract(identity, '$.name') LIKE ? OR json_extract(identity, '$.description') LIKE ?)`
+		q := "%" + opts.Query + "%"
+		args = append(args, q, q, q)
+	}
+
+	query += ` ORDER BY downloads DESC, created_at DESC`
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	query += ` LIMIT ? OFFSET ?`
+	args = append(args, limit, opts.Offset)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var agents []*model.AgentDNA
+	for rows.Next() {
+		a, err := scanAgentDNARows(rows)
+		if err != nil {
+			return nil, err
+		}
+		agents = append(agents, a)
+	}
+	return agents, rows.Err()
+}
+
+func (s *sqliteStore) IncrementAgentDNADownloads(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE agent_dnas SET downloads = downloads + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id)
+	return err
+}
+
+// AgentDNA SQL and scan helpers
+
+const agentDNASelectSQL = `SELECT id, user_id, slug, version, identity, soul, tools, memory, skills, manifest,
+	repo_url, repo_ref, status, downloads, rating, created_at, updated_at, published_at
+	FROM agent_dnas`
+
+func scanAgentDNA(row scannable) (*model.AgentDNA, error) {
+	var (
+		a            model.AgentDNA
+		identityJSON string
+		soulJSON     sql.NullString
+		toolsJSON    sql.NullString
+		memoryJSON   sql.NullString
+		skillsJSON   sql.NullString
+		manifestJSON string
+		publishedAt  sql.NullTime
+	)
+	err := row.Scan(
+		&a.ID, &a.UserID, &a.Slug, &a.Version,
+		&identityJSON, &soulJSON, &toolsJSON, &memoryJSON, &skillsJSON,
+		&manifestJSON, &a.RepoURL, &a.RepoRef,
+		&a.Status, &a.Downloads, &a.Rating,
+		&a.CreatedAt, &a.UpdatedAt, &publishedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("agent not found")
+		}
+		return nil, err
+	}
+
+	a.Identity = &model.AgentIdentity{}
+	json.Unmarshal([]byte(identityJSON), a.Identity)
+
+	if soulJSON.Valid {
+		a.Soul = &model.AgentSoul{}
+		json.Unmarshal([]byte(soulJSON.String), a.Soul)
+	}
+	if toolsJSON.Valid {
+		a.Tools = json.RawMessage(toolsJSON.String)
+	}
+	if memoryJSON.Valid {
+		a.Memory = json.RawMessage(memoryJSON.String)
+	}
+	if skillsJSON.Valid {
+		a.Skills = json.RawMessage(skillsJSON.String)
+	}
+
+	a.Manifest = &model.AgentManifest{}
+	json.Unmarshal([]byte(manifestJSON), a.Manifest)
+
+	if publishedAt.Valid {
+		t := publishedAt.Time
+		a.PublishedAt = &t
+	}
+
+	return &a, nil
+}
+
+func scanAgentDNARows(rows *sql.Rows) (*model.AgentDNA, error) {
+	var (
+		a            model.AgentDNA
+		identityJSON string
+		soulJSON     sql.NullString
+		toolsJSON    sql.NullString
+		memoryJSON   sql.NullString
+		skillsJSON   sql.NullString
+		manifestJSON string
+		publishedAt  sql.NullTime
+	)
+	err := rows.Scan(
+		&a.ID, &a.UserID, &a.Slug, &a.Version,
+		&identityJSON, &soulJSON, &toolsJSON, &memoryJSON, &skillsJSON,
+		&manifestJSON, &a.RepoURL, &a.RepoRef,
+		&a.Status, &a.Downloads, &a.Rating,
+		&a.CreatedAt, &a.UpdatedAt, &publishedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	a.Identity = &model.AgentIdentity{}
+	json.Unmarshal([]byte(identityJSON), a.Identity)
+
+	if soulJSON.Valid {
+		a.Soul = &model.AgentSoul{}
+		json.Unmarshal([]byte(soulJSON.String), a.Soul)
+	}
+	if toolsJSON.Valid {
+		a.Tools = json.RawMessage(toolsJSON.String)
+	}
+	if memoryJSON.Valid {
+		a.Memory = json.RawMessage(memoryJSON.String)
+	}
+	if skillsJSON.Valid {
+		a.Skills = json.RawMessage(skillsJSON.String)
+	}
+
+	a.Manifest = &model.AgentManifest{}
+	json.Unmarshal([]byte(manifestJSON), a.Manifest)
+
+	if publishedAt.Valid {
+		t := publishedAt.Time
+		a.PublishedAt = &t
+	}
+
+	return &a, nil
+}
+
+// marshalNullable returns a *string (JSON) or nil for nullable JSON columns.
+func marshalNullable(v any) *string {
+	if v == nil {
+		return nil
+	}
+	b, _ := json.Marshal(v)
+	s := string(b)
+	return &s
+}
+
+// nullableJSON returns a *string or nil for json.RawMessage fields.
+func nullableJSON(raw json.RawMessage) *string {
+	if len(raw) == 0 {
+		return nil
+	}
+	s := string(raw)
+	return &s
 }
