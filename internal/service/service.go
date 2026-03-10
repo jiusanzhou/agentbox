@@ -261,6 +261,8 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("POST /api/v1/registry/agents", svc.CreateRegistryAgent)
 	mux.HandleFunc("PATCH /api/v1/registry/agents/{id}", svc.UpdateRegistryAgent)
 	mux.HandleFunc("POST /api/v1/registry/agents/{id}/hire", svc.HireRegistryAgent)
+	mux.HandleFunc("POST /api/v1/registry/agents/publish", svc.PublishRegistryAgent)
+	mux.HandleFunc("POST /api/v1/registry/webhooks/git", svc.WebhookGitPush)
 
 	// Register endpoints via talk reflection
 	if err := server.Register(svc); err != nil {

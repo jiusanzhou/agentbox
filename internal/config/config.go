@@ -51,6 +51,9 @@ type Config struct {
 
 	// CORS settings
 	CORS CORSConfig `json:"cors,omitempty" yaml:"cors"`
+
+	// Webhook secret for verifying git push hooks
+	WebhookSecret string `json:"webhook_secret,omitempty" yaml:"webhook_secret" opts:"env=ABOX_WEBHOOK_SECRET"`
 }
 
 // RateLimitConfig holds rate limiting settings.
