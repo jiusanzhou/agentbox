@@ -41,6 +41,7 @@ func init() {
 		agentRemoveCmd,
 		agentExtractCmd,
 		agentSanitizeCmd,
+		agentRefineCmd,
 	)
 }
 

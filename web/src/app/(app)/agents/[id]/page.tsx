@@ -163,14 +163,23 @@ export default function AgentDetailPage() {
       {exp && exp.highlights && exp.highlights.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>
-              Experience
-              {exp.domains && (
-                <span className="text-sm font-normal text-muted-foreground ml-2">
-                  {exp.domains.join(" · ")}
-                </span>
-              )}
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>
+                Experience
+                {exp.domains && (
+                  <span className="text-sm font-normal text-muted-foreground ml-2">
+                    {exp.domains.join(" · ")}
+                  </span>
+                )}
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push(`/agents/${params.id}/experience`)}
+              >
+                Manage Experience
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">

@@ -17,14 +17,27 @@ var agentExtractCmd = cli.New(
 	cli.Run(runAgentExtract),
 )
 
+var agentRefineCmd = cli.New(
+	cli.Name("refine"),
+	cli.Short("Apply L2 AI refinement to experience packs (requires LLM)"),
+	cli.Run(runAgentRefine),
+)
+
 var (
-	extractOutput string
-	extractFormat string
+	extractOutput  string
+	extractFormat  string
+	refineBaseURL  string
+	refineAPIKey   string
+	refineModel    string
 )
 
 func init() {
 	agentExtractCmd.Flags().StringVarP(&extractOutput, "output", "o", "", "Output directory for experience packs (default: stdout)")
 	agentExtractCmd.Flags().StringVarP(&extractFormat, "format", "f", "yaml", "Output format (yaml|json|markdown)")
+
+	agentRefineCmd.Flags().StringVar(&refineBaseURL, "base-url", "", "LLM API base URL (or AGENTBOX_LLM_URL env)")
+	agentRefineCmd.Flags().StringVar(&refineAPIKey, "api-key", "", "LLM API key (or AGENTBOX_LLM_KEY env)")
+	agentRefineCmd.Flags().StringVar(&refineModel, "model", "claude-sonnet-4-20250514", "LLM model to use")
 }
 
 func runAgentExtract(cmd *cli.Command, args ...string) {
@@ -182,4 +195,70 @@ func runAgentSanitize(cmd *cli.Command, args ...string) {
 		}
 		fmt.Print(result)
 	}
+}
+
+// --- refine command ---
+
+func runAgentRefine(cmd *cli.Command, args ...string) {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: aboxctl agent refine <experience-dir> [--base-url URL] [--api-key KEY]")
+		os.Exit(1)
+	}
+
+	// Resolve config
+	baseURL := refineBaseURL
+	if baseURL == "" {
+		baseURL = os.Getenv("AGENTBOX_LLM_URL")
+	}
+	if baseURL == "" {
+		fmt.Fprintln(os.Stderr, "Error: --base-url or AGENTBOX_LLM_URL is required")
+		os.Exit(1)
+	}
+
+	apiKey := refineAPIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("AGENTBOX_LLM_KEY")
+	}
+
+	cfg := agent.L2RefineConfig{
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+		Model:   refineModel,
+	}
+
+	dir := args[0]
+	idx, err := agent.ParseExperienceDir(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(idx.Packs) == 0 {
+		fmt.Fprintln(os.Stderr, "No experience packs found.")
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "Refining %d experience packs with %s...\n", len(idx.Packs), cfg.Model)
+
+	for i := range idx.Packs {
+		p := &idx.Packs[i]
+		fmt.Fprintf(os.Stderr, "  [%d/%d] %s ... ", i+1, len(idx.Packs), p.ID)
+
+		if err := agent.RefineL2(p, cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "✅\n")
+
+		// Write back refined pack
+		data, _ := yaml.Marshal(p)
+		outPath := filepath.Join(dir, p.ID+".yaml")
+		os.WriteFile(outPath, data, 0644)
+	}
+
+	// Update index
+	idxData, _ := yaml.Marshal(idx)
+	os.WriteFile(filepath.Join(dir, "index.yaml"), idxData, 0644)
+
+	fmt.Fprintf(os.Stderr, "\nDone. Refined packs written to %s\n", dir)
 }
