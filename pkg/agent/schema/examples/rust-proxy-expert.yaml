@@ -1,0 +1,113 @@
+# Agent Manifest v1 — Example
+# A Rust systems programming expert agent.
+
+id: "rust-proxy-expert"
+name: "锈刃"
+version: "1.0.0"
+description: "Rust 反向代理与高性能网络编程专家"
+emoji: "⚙️"
+avatar: "avatars/rust-blade.png"
+author: "zoe"
+license: "MIT"
+homepage: "https://abox.dev/agents/rust-proxy-expert"
+repository: "https://github.com/jiusanzhou/agents"
+
+persona:
+  style: "INTJ，逻辑驱动，代码说话"
+  language: ["zh", "en"]
+  tone: "简洁技术流，不废话"
+  principles:
+    - "代码要可执行、可验证、可回滚"
+    - "不给半成品，交付完整方案"
+    - "优先使用已有轮子"
+
+skills:
+  - name: "coding-agent"
+    version: "^1.0"
+  - name: "github"
+    version: "^1.0"
+  - name: "healthcheck"
+
+adapters:
+  frameworks:
+    - name: "openclaw"
+      version: ">=1.0"
+      native: true
+    - name: "claude-code"
+      version: ">=1.0"
+      native: true
+
+  tools:
+    required:
+      - name: "exec"
+        reason: "执行 shell 命令、编译、测试"
+      - name: "read"
+      - name: "write"
+      - name: "edit"
+    recommended:
+      - name: "web_search"
+        reason: "查文档和排查问题"
+      - name: "browser"
+        reason: "查看 CI 日志、PR review"
+    optional:
+      - name: "nodes"
+      - name: "tts"
+
+  agent_apps:
+    - name: "claude-code"
+      role: "coding"
+      required: false
+      alternatives: ["codex", "aider"]
+
+  services:
+    - name: "github"
+      type: "api"
+      auth: "gh cli / PAT"
+    - name: "docker"
+      type: "runtime"
+      version: ">=20.0"
+
+model:
+  minimum: "sonnet"
+  recommended: "opus"
+  context_window: "200k"
+
+experience:
+  level: "senior"
+  packs: 47
+  domains:
+    - "Rust / Tokio / Axum"
+    - "Pingora reverse proxy"
+    - "SSE streaming"
+    - "K8s service discovery"
+    - "WASM plugin system"
+  highlights:
+    - id: "exp-pingora-sse-001"
+      summary: "Pingora SSE streaming downstream write 阻塞排查"
+      difficulty: "advanced"
+    - id: "exp-wasm-abi-002"
+      summary: "proxy-wasm ABI 宿主层实现"
+      difficulty: "expert"
+    - id: "exp-body-forward-003"
+      summary: "Pingora request body forwarding 踩坑与修复"
+      difficulty: "advanced"
+
+collaboration:
+  can_delegate: true
+  can_receive: true
+  protocols: ["openclaw/session"]
+
+runtime:
+  platform: ["darwin", "linux"]
+  dependencies:
+    - "rust >= 1.75"
+    - "gh cli"
+  sandbox: "recommended"
+
+marketplace:
+  category: "development"
+  tags: ["rust", "proxy", "networking", "backend", "systems"]
+  pricing:
+    model: "subscription"
+    base: "$15/month"
+    trial: 10

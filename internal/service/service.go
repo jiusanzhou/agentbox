@@ -262,6 +262,9 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("PATCH /api/v1/registry/agents/{id}", svc.UpdateRegistryAgent)
 	mux.HandleFunc("POST /api/v1/registry/agents/{id}/hire", svc.HireRegistryAgent)
 	mux.HandleFunc("POST /api/v1/registry/agents/publish", svc.PublishRegistryAgent)
+	mux.HandleFunc("POST /api/v1/registry/agents/upload", svc.UploadAgentManifest)
+	mux.HandleFunc("GET /api/v1/registry/agents/{id}/manifest", svc.GetAgentManifest)
+	mux.HandleFunc("GET /api/v1/registry/agents/search", svc.SearchRegistryAgents)
 	mux.HandleFunc("POST /api/v1/registry/webhooks/git", svc.WebhookGitPush)
 
 	// Register endpoints via talk reflection
