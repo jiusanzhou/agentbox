@@ -151,7 +151,12 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_agent_dnas_user ON agent_dnas(user_id);
 		CREATE INDEX IF NOT EXISTS idx_agent_dnas_status ON agent_dnas(status);
 	`)
+	if err != nil {
+		return err
+	}
 
+	// Billing tables
+	_, err = db.Exec(billingMigration)
 	return err
 }
 

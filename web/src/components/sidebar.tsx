@@ -31,6 +31,7 @@ export function Sidebar() {
     { href: "/runs", label: "Runs", icon: PlayIcon },
     { href: "/agents", label: "Agents", icon: AgentsIcon },
     { href: "/skills", label: "Skills", icon: SkillsIcon },
+    { href: "/billing", label: "Billing", icon: BillingIcon },
     { href: "/integrations", label: "Integrations", icon: IntegrationsIcon },
     { href: "/settings", label: "Settings", icon: SettingsIcon },
   ];
@@ -150,6 +151,15 @@ function AgentsIcon({ className }: { className?: string }) {
       <circle cx="9" cy="7" r="4" />
       <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function BillingIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+      <line x1="1" y1="10" x2="23" y2="10" />
     </svg>
   );
 }

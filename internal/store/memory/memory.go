@@ -22,6 +22,7 @@ type memoryStore struct {
 	users        map[string]*model.User
 	integrations map[string]*model.Integration
 	agentDNAs    map[string]*model.AgentDNA
+	billing      *billingData
 }
 
 func New() store.Store {
@@ -30,6 +31,7 @@ func New() store.Store {
 		users:        make(map[string]*model.User),
 		integrations: make(map[string]*model.Integration),
 		agentDNAs:    make(map[string]*model.AgentDNA),
+		billing:      newBillingData(),
 	}
 }
 

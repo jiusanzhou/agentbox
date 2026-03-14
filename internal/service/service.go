@@ -270,6 +270,15 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("POST /api/v1/experience/sanitize", svc.SanitizePreview)
 	mux.HandleFunc("POST /api/v1/registry/webhooks/git", svc.WebhookGitPush)
 
+	// Billing endpoints
+	mux.HandleFunc("POST /api/v1/billing/subscribe", svc.SubscribeAgent)
+	mux.HandleFunc("GET /api/v1/billing/subscriptions", svc.ListSubscriptions)
+	mux.HandleFunc("POST /api/v1/billing/subscriptions/{id}/cancel", svc.CancelSubscription)
+	mux.HandleFunc("POST /api/v1/billing/usage", svc.RecordUsage)
+	mux.HandleFunc("GET /api/v1/billing/usage/summary", svc.GetUsageSummary)
+	mux.HandleFunc("GET /api/v1/billing/usage/records", svc.ListUsageRecords)
+	mux.HandleFunc("GET /api/v1/billing/revenue", svc.GetAuthorRevenue)
+
 	// Register endpoints via talk reflection
 	if err := server.Register(svc); err != nil {
 		return nil, fmt.Errorf("register endpoints: %w", err)

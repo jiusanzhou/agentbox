@@ -50,6 +50,21 @@ type Store interface {
 	DeleteAgentDNA(ctx context.Context, id string) error
 	ListAgentDNAs(ctx context.Context, opts model.AgentDNAListOptions) ([]*model.AgentDNA, error)
 	IncrementAgentDNADownloads(ctx context.Context, id string) error
+
+	// Billing methods
+	CreateSubscription(ctx context.Context, sub *model.Subscription) error
+	GetSubscription(ctx context.Context, id string) (*model.Subscription, error)
+	GetActiveSubscription(ctx context.Context, userID, agentID string) (*model.Subscription, error)
+	UpdateSubscription(ctx context.Context, sub *model.Subscription) error
+	ListSubscriptions(ctx context.Context, userID string) ([]*model.Subscription, error)
+
+	CreateUsageRecord(ctx context.Context, rec *model.UsageRecord) error
+	GetUsageSummary(ctx context.Context, userID, agentID, period string) (*model.UsageSummary, error)
+	ListUsageRecords(ctx context.Context, opts model.BillingListOptions) ([]*model.UsageRecord, error)
+
+	CreateAuthorPayout(ctx context.Context, payout *model.AuthorPayout) error
+	GetAuthorPayout(ctx context.Context, authorUserID, period string) (*model.AuthorPayout, error)
+	ListAuthorPayouts(ctx context.Context, authorUserID string) ([]*model.AuthorPayout, error)
 }
 
 // New creates a new Store from a TypedLazyConfig.
