@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abox.dev/schemas/experience/v1",
+  "title": "Experience Pack",
+  "description": "A sanitized, tradeable unit of agent experience.",
+  "type": "object",
+  "required": ["id", "domain", "summary", "detail"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^exp-[a-z0-9-]+$",
+      "description": "Unique experience ID (e.g. exp-pingora-sse-001)."
+    },
+    "domain": {
+      "type": "string",
+      "description": "Knowledge domain (e.g. 'Rust / Reverse Proxy / Streaming')."
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "One-line summary."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Full experience description (problem, investigation, solution, lessons)."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Searchable tags."
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": ["basic", "intermediate", "advanced", "expert"],
+      "description": "Difficulty level."
+    },
+    "verified": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this experience has been verified in production."
+    },
+    "accumulated_at": {
+      "type": "string",
+      "description": "When this experience was gained (YYYY-MM or YYYY-MM-DD)."
+    },
+    "source": {
+      "$ref": "#/$defs/ExperienceSource"
+    },
+    "sanitization": {
+      "$ref": "#/$defs/SanitizationInfo"
+    }
+  },
+  "$defs": {
+    "ExperienceSource": {
+      "type": "object",
+      "description": "Provenance info (how this experience was derived).",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["memory", "manual", "imported"],
+          "description": "How the experience was created."
+        },
+        "memory_file": {
+          "type": "string",
+          "description": "Original memory file path (sanitized, no user info)."
+        },
+        "memory_lines": {
+          "type": "string",
+          "description": "Line range in source file."
+        }
+      }
+    },
+    "SanitizationInfo": {
+      "type": "object",
+      "description": "Record of sanitization applied.",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["L1", "L2", "L3"],
+          "description": "Highest sanitization level applied."
+        },
+        "sanitized_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reviewed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether a human reviewed the sanitization."
+        },
+        "reviewer": {
+          "type": "string",
+          "description": "Who reviewed (author username)."
+        }
+      }
+    }
+  }
+}
