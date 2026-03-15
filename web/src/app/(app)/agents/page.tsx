@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { clientFetch } from "@/lib/api";
-import type { AgentDNA } from "@/lib/types";
 
 const LEVEL_BADGES: Record<string, { label: string; color: string }> = {
   junior: { label: "🌱 Junior", color: "bg-green-100 text-green-800" },
@@ -22,6 +22,8 @@ export default function AgentsPage() {
   const [search, setSearch] = useState("");
   const [framework, setFramework] = useState("");
   const [level, setLevel] = useState("");
+  const [runtime, setRuntime] = useState("");
+  const [tag, setTag] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -34,6 +36,8 @@ export default function AgentsPage() {
       if (search) params.set("q", search);
       if (framework) params.set("framework", framework);
       if (level) params.set("level", level);
+      if (runtime) params.set("runtime", runtime);
+      if (tag) params.set("tag", tag);
 
       const resp = await clientFetch(`/api/v1/registry/agents/search?${params}`);
       const data = await resp.json();
@@ -46,9 +50,12 @@ export default function AgentsPage() {
   }
 
   useEffect(() => {
-    const timer = setTimeout(loadAgents, 300);
+    const timer = setTimeout(() => {
+      setLoading(true);
+      loadAgents();
+    }, 300);
     return () => clearTimeout(timer);
-  }, [search, framework, level]);
+  }, [search, framework, level, runtime, tag]);
 
   const frameworks = useMemo(() => {
     const fws = new Set<string>();
@@ -60,44 +67,115 @@ export default function AgentsPage() {
     return Array.from(fws);
   }, [agents]);
 
+  const runtimes = useMemo(() => {
+    const rts = new Set<string>();
+    agents.forEach((a) => {
+      if (a.manifest?.runtime) rts.add(a.manifest.runtime);
+    });
+    return Array.from(rts);
+  }, [agents]);
+
+  const allTags = useMemo(() => {
+    const ts = new Set<string>();
+    agents.forEach((a) => {
+      const tags = a.manifest?.marketplace?.tags || a.manifest?.tags || [];
+      tags.forEach((t: string) => ts.add(t));
+    });
+    return Array.from(ts).slice(0, 12);
+  }, [agents]);
+
+  const hasFilters = search || framework || level || runtime || tag;
+
+  function clearFilters() {
+    setSearch("");
+    setFramework("");
+    setLevel("");
+    setRuntime("");
+    setTag("");
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Agent Marketplace</h1>
-        <p className="text-muted-foreground mt-1">
-          Hire AI agents with real experience. The more they work, the better they get.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Agent Marketplace</h1>
+          <p className="text-muted-foreground mt-1">
+            Hire AI agents with real experience. The more they work, the better they get.
+          </p>
+        </div>
+        <Link href="/agents/my">
+          <Button variant="outline">My Agents →</Button>
+        </Link>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3 flex-wrap">
-        <Input
-          placeholder="Search agents..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs"
-        />
-        <select
-          value={framework}
-          onChange={(e) => setFramework(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm"
-        >
-          <option value="">All Frameworks</option>
-          {frameworks.map((fw) => (
-            <option key={fw} value={fw}>{fw}</option>
-          ))}
-        </select>
-        <select
-          value={level}
-          onChange={(e) => setLevel(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm"
-        >
-          <option value="">All Levels</option>
-          <option value="junior">🌱 Junior</option>
-          <option value="mid">🌿 Mid</option>
-          <option value="senior">🌳 Senior</option>
-          <option value="expert">⭐ Expert</option>
-        </select>
+      <div className="space-y-3">
+        <div className="flex gap-3 flex-wrap">
+          <Input
+            placeholder="Search agents..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="max-w-xs"
+          />
+          <select
+            value={framework}
+            onChange={(e) => setFramework(e.target.value)}
+            className="border border-border rounded-md px-3 py-2 text-sm bg-background"
+          >
+            <option value="">All Frameworks</option>
+            {frameworks.map((fw) => (
+              <option key={fw} value={fw}>{fw}</option>
+            ))}
+          </select>
+          <select
+            value={level}
+            onChange={(e) => setLevel(e.target.value)}
+            className="border border-border rounded-md px-3 py-2 text-sm bg-background"
+          >
+            <option value="">All Levels</option>
+            <option value="junior">🌱 Junior</option>
+            <option value="mid">🌿 Mid</option>
+            <option value="senior">🌳 Senior</option>
+            <option value="expert">⭐ Expert</option>
+          </select>
+          <select
+            value={runtime}
+            onChange={(e) => setRuntime(e.target.value)}
+            className="border border-border rounded-md px-3 py-2 text-sm bg-background"
+          >
+            <option value="">All Runtimes</option>
+            {runtimes.map((rt) => (
+              <option key={rt} value={rt}>{rt}</option>
+            ))}
+          </select>
+          {hasFilters && (
+            <button
+              onClick={clearFilters}
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors px-2"
+            >
+              Clear filters ×
+            </button>
+          )}
+        </div>
+
+        {/* Tag pills */}
+        {allTags.length > 0 && (
+          <div className="flex gap-2 flex-wrap">
+            {allTags.map((t) => (
+              <button
+                key={t}
+                onClick={() => setTag(tag === t ? "" : t)}
+                className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+                  tag === t
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border text-muted-foreground hover:text-foreground hover:border-foreground"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Agent Grid */}
@@ -127,6 +205,12 @@ function AgentCard({ agent, onClick }: { agent: any; onClick: () => void }) {
   const exp = manifest?.experience;
   const levelBadge = exp?.level ? LEVEL_BADGES[exp.level] : null;
   const pricing = manifest?.marketplace?.pricing;
+  const tags = manifest?.marketplace?.tags || manifest?.tags || [];
+
+  const pricingLabel =
+    pricing?.model === "free"
+      ? "Free"
+      : pricing?.base || pricing?.model || "Free";
 
   return (
     <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={onClick}>
@@ -168,31 +252,32 @@ function AgentCard({ agent, onClick }: { agent: any; onClick: () => void }) {
         )}
 
         {/* Tags */}
-        {manifest?.marketplace?.tags && (
+        {tags.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {manifest.marketplace.tags.slice(0, 4).map((t: string) => (
+            {tags.slice(0, 4).map((t: string) => (
               <Badge key={t} variant="secondary" className="text-xs">{t}</Badge>
             ))}
           </div>
         )}
 
-        {/* Footer: stats + pricing */}
+        {/* Footer: stats + pricing + runtime */}
         <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
           <div className="flex gap-3">
             {exp?.packs != null && <span>{exp.packs} exp packs</span>}
             {agent.downloads > 0 && <span>{agent.downloads} installs</span>}
             {agent.rating > 0 && <span>⭐ {agent.rating.toFixed(1)}</span>}
           </div>
-          {pricing && (
-            <span className="font-medium">
-              {pricing.model === "free" ? "Free" : pricing.base || pricing.model}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {manifest?.runtime && (
+              <span className="font-mono opacity-70">{manifest.runtime}</span>
+            )}
+            <span className="font-medium">{pricingLabel}</span>
+          </div>
         </div>
 
         {/* Frameworks */}
-        {manifest?.adapters?.frameworks && (
-          <div className="flex gap-1">
+        {manifest?.adapters?.frameworks && manifest.adapters.frameworks.length > 0 && (
+          <div className="flex gap-1 flex-wrap">
             {manifest.adapters.frameworks.map((fw: any) => (
               <Badge key={fw.name} variant="outline" className="text-[10px]">
                 {fw.name}
