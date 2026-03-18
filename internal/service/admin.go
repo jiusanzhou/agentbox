@@ -9,7 +9,7 @@ import (
 
 	"go.zoe.im/agentbox/internal/channel"
 	"go.zoe.im/agentbox/internal/config"
-	"go.zoe.im/agentbox/internal/runtime"
+	"go.zoe.im/agentbox/pkg/runtime"
 	"go.zoe.im/x"
 )
 

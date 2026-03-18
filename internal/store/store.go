@@ -65,6 +65,18 @@ type Store interface {
 	CreateAuthorPayout(ctx context.Context, payout *model.AuthorPayout) error
 	GetAuthorPayout(ctx context.Context, authorUserID, period string) (*model.AuthorPayout, error)
 	ListAuthorPayouts(ctx context.Context, authorUserID string) ([]*model.AuthorPayout, error)
+
+	// Run cost breakdown
+	UpsertRunCostBreakdown(ctx context.Context, b *model.RunCostBreakdown) error
+	GetRunCostBreakdown(ctx context.Context, runID string) (*model.RunCostBreakdown, error)
+
+	// Stripe customer mapping
+	UpsertStripeCustomer(ctx context.Context, c *model.StripeCustomer) error
+	GetStripeCustomer(ctx context.Context, userID string) (*model.StripeCustomer, error)
+
+	// Free quota
+	GetFreeQuotaUsage(ctx context.Context, userID, agentID, period string) (*model.FreeQuotaUsage, error)
+	IncrementFreeQuotaUsage(ctx context.Context, userID, agentID, period string, limit int64) error
 }
 
 // New creates a new Store from a TypedLazyConfig.

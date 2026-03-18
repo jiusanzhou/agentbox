@@ -137,3 +137,43 @@ type BillingListOptions struct {
 	Limit    int
 	Offset   int
 }
+
+// --- Run Cost Breakdown ---
+
+// RunCostBreakdown shows the itemised cost for a single run.
+// All monetary values are in micros (1/1,000,000 USD).
+type RunCostBreakdown struct {
+	RunID                 string `json:"run_id"`
+	PricingModel          string `json:"pricing_model"`
+	DurationMs            int64  `json:"duration_ms"`
+	InputTokens           int64  `json:"input_tokens"`
+	OutputTokens          int64  `json:"output_tokens"`
+	ComputeMicros         int64  `json:"compute_micros"`          // infra / cloud cost
+	TokenMicros           int64  `json:"token_micros"`            // LLM API cost
+	AgentFeeMicros        int64  `json:"agent_fee_micros"`        // creator-facing fee
+	CreatorEarningsMicros int64  `json:"creator_earnings_micros"` // creator's 70%
+	PlatformFeeMicros     int64  `json:"platform_fee_micros"`     // platform's 30%
+	TotalMicros           int64  `json:"total_micros"`            // what user pays
+	CreatedAt             time.Time `json:"created_at"`
+}
+
+// --- Stripe Customer ---
+
+// StripeCustomer maps a platform user to a Stripe customer ID.
+type StripeCustomer struct {
+	UserID           string    `json:"user_id"`
+	StripeCustomerID string    `json:"stripe_customer_id"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// --- Free Quota ---
+
+// FreeQuotaUsage tracks how many free runs a user has consumed in a period.
+type FreeQuotaUsage struct {
+	UserID    string    `json:"user_id"`
+	AgentID   string    `json:"agent_id"` // empty = platform-wide quota
+	Period    string    `json:"period"`   // YYYY-MM
+	Limit     int64     `json:"limit"`
+	Used      int64     `json:"used"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

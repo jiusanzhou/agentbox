@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"go.zoe.im/agentbox/internal/auth"
+	"go.zoe.im/agentbox/internal/billing"
 	"go.zoe.im/agentbox/internal/channel"
 	"go.zoe.im/agentbox/internal/config"
 	"go.zoe.im/agentbox/internal/engine"
@@ -24,7 +25,7 @@ import (
 	"go.zoe.im/agentbox/internal/integration"
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/agentbox/internal/ratelimit"
-	"go.zoe.im/agentbox/internal/runtime"
+	"go.zoe.im/agentbox/pkg/runtime"
 	"go.zoe.im/agentbox/internal/storage"
 	"go.zoe.im/agentbox/internal/store"
 	"go.zoe.im/agentbox/internal/tunnel"
@@ -49,7 +50,7 @@ import (
 	_ "go.zoe.im/agentbox/internal/channel/webhook"
 
 	// register runtime implementations
-	_ "go.zoe.im/agentbox/internal/runtime"
+	_ "go.zoe.im/agentbox/pkg/runtime"
 )
 
 // Context keys for API provider headers.
@@ -102,6 +103,7 @@ type Service struct {
 	store        store.Store
 	installs     *installManager
 	logger       *slog.Logger
+	stripe       *billing.StripeClient
 }
 
 func New(cfg *config.Config) (*Service, error) {
@@ -185,6 +187,24 @@ func New(cfg *config.Config) (*Service, error) {
 		authLimiter: auth.NewAuthRateLimiter(),
 		installs:    newInstallManager(),
 		logger:      logger,
+	}
+
+	// Initialize Stripe client if credentials are configured
+	if cfg.Stripe.SecretKey != "" {
+		successURL := cfg.Stripe.SuccessURL
+		if successURL == "" {
+			successURL = "http://localhost:" + fmt.Sprintf("%d", cfg.Port) + "/billing/success"
+		}
+		cancelURL := cfg.Stripe.CancelURL
+		if cancelURL == "" {
+			cancelURL = "http://localhost:" + fmt.Sprintf("%d", cfg.Port) + "/billing/cancel"
+		}
+		svc.stripe = billing.NewStripeClient(
+			cfg.Stripe.SecretKey,
+			cfg.Stripe.WebhookSecret,
+			successURL,
+			cancelURL,
+		)
 	}
 
 	// Register SSE streaming endpoint (raw HTTP, not via talk)
@@ -278,6 +298,10 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("GET /api/v1/billing/usage/summary", svc.GetUsageSummary)
 	mux.HandleFunc("GET /api/v1/billing/usage/records", svc.ListUsageRecords)
 	mux.HandleFunc("GET /api/v1/billing/revenue", svc.GetAuthorRevenue)
+	mux.HandleFunc("POST /api/v1/billing/checkout", svc.CreateCheckoutSession)
+	mux.HandleFunc("POST /api/v1/billing/stripe/webhook", svc.HandleStripeWebhook)
+	mux.HandleFunc("GET /api/v1/billing/runs/{runId}/cost", svc.GetRunCost)
+	mux.HandleFunc("GET /api/v1/billing/quota", svc.GetQuotaStatus)
 
 	// Register endpoints via talk reflection
 	if err := server.Register(svc); err != nil {

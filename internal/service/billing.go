@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.zoe.im/agentbox/internal/auth"
+	billingpkg "go.zoe.im/agentbox/internal/billing"
 	"go.zoe.im/agentbox/internal/model"
 )
 
@@ -298,4 +299,199 @@ func (s *Service) CheckAgentAccess(userID, agentID string) (bool, string) {
 
 func r2ctx() context.Context {
 	return context.Background()
+}
+
+// --- Stripe Checkout ---
+
+// CreateCheckoutSession handles POST /api/v1/billing/checkout
+// Creates a Stripe Checkout session for subscribing to a paid agent.
+func (s *Service) CreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	if s.stripe == nil {
+		http.Error(w, `{"error":"stripe not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		AgentID       string `json:"agent_id"`
+		StripePriceID string `json:"stripe_price_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	dna, err := s.store.GetAgentDNA(r.Context(), req.AgentID)
+	if err != nil {
+		dna, err = s.store.GetAgentDNABySlug(r.Context(), req.AgentID)
+		if err != nil {
+			http.Error(w, `{"error":"agent not found"}`, http.StatusNotFound)
+			return
+		}
+	}
+
+	// Get or create Stripe customer
+	var customerID string
+	if sc, err := s.store.GetStripeCustomer(r.Context(), user.ID); err == nil {
+		customerID = sc.StripeCustomerID
+	} else {
+		customerID, err = s.stripe.EnsureCustomer(user.ID, user.Email, user.Name)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		_ = s.store.UpsertStripeCustomer(r.Context(), &model.StripeCustomer{
+			UserID:           user.ID,
+			StripeCustomerID: customerID,
+			CreatedAt:        time.Now(),
+		})
+	}
+
+	priceID := req.StripePriceID
+	if priceID == "" {
+		priceID = dna.Manifest.Requirements["stripe_price_id"]
+	}
+	if priceID == "" {
+		http.Error(w, `{"error":"no stripe_price_id for this agent"}`, http.StatusBadRequest)
+		return
+	}
+
+	resp, err := s.stripe.CreateCheckoutSession(billingpkg.CheckoutRequest{
+		UserID:           user.ID,
+		StripeCustomerID: customerID,
+		AgentID:          dna.ID,
+		AgentName:        dna.Slug,
+		PricingModel:     dna.Manifest.PricingModel,
+		StripePriceID:    priceID,
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// HandleStripeWebhook handles POST /api/v1/billing/stripe/webhook
+// Processes Stripe webhook events to update subscription state.
+func (s *Service) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
+	if s.stripe == nil {
+		http.Error(w, `{"error":"stripe not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	event, err := s.stripe.ParseWebhook(r)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	switch event.Type {
+	case "customer.subscription.created", "customer.subscription.updated":
+		if event.UserID == "" {
+			// Look up user by stripe customer ID (best effort)
+			break
+		}
+		sub, _ := s.store.GetActiveSubscription(ctx, event.UserID, event.AgentID)
+		if sub == nil {
+			break
+		}
+		sub.Status = billingpkg.SubscriptionStatusFromStripe(event.Status)
+		sub.StripeSubID = event.StripeSubID
+		sub.StripePriceID = event.PriceID
+		sub.UpdatedAt = time.Now()
+		_ = s.store.UpdateSubscription(ctx, sub)
+
+	case "customer.subscription.deleted":
+		if event.UserID == "" {
+			break
+		}
+		sub, _ := s.store.GetActiveSubscription(ctx, event.UserID, event.AgentID)
+		if sub == nil {
+			break
+		}
+		now := time.Now()
+		sub.Status = model.SubscriptionCanceled
+		sub.CanceledAt = &now
+		sub.UpdatedAt = now
+		_ = s.store.UpdateSubscription(ctx, sub)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// --- Run Cost Breakdown ---
+
+// GetRunCost handles GET /api/v1/billing/runs/{runId}/cost
+// Returns the itemised cost breakdown for a completed run.
+func (s *Service) GetRunCost(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	runID := r.PathValue("runId")
+	breakdown, err := s.store.GetRunCostBreakdown(r.Context(), runID)
+	if err != nil {
+		http.Error(w, `{"error":"run cost not found"}`, http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(breakdown)
+}
+
+// --- Free Quota Status ---
+
+// GetQuotaStatus handles GET /api/v1/billing/quota
+// Returns free run quota usage for the current user.
+func (s *Service) GetQuotaStatus(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	agentID := r.URL.Query().Get("agent_id")
+	period := time.Now().Format("2006-01")
+	limit := s.cfg.Stripe.FreeRunsPerMonth
+	if limit == 0 {
+		limit = 10 // default: 10 free runs/month
+	}
+
+	usage, err := s.store.GetFreeQuotaUsage(r.Context(), user.ID, agentID, period)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	if usage.Limit == 0 {
+		usage.Limit = limit
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"user_id":   user.ID,
+		"agent_id":  agentID,
+		"period":    period,
+		"limit":     usage.Limit,
+		"used":      usage.Used,
+		"remaining": max(0, usage.Limit-usage.Used),
+		"exhausted": usage.Used >= usage.Limit,
+	})
+}
+
+func max(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }

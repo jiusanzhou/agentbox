@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"go.zoe.im/agentbox/internal/executor"
-	"go.zoe.im/agentbox/internal/runtime"
+	"go.zoe.im/agentbox/pkg/runtime"
 )
 
 // testRuntime is a minimal runtime for testing that runs a shell echo.

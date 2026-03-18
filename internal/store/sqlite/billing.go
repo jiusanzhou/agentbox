@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"go.zoe.im/agentbox/internal/model"
 )
@@ -64,6 +65,37 @@ CREATE TABLE IF NOT EXISTS author_payouts (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payouts_author_period ON author_payouts(author_user_id, period);
+
+CREATE TABLE IF NOT EXISTS run_cost_breakdowns (
+	run_id TEXT PRIMARY KEY,
+	pricing_model TEXT NOT NULL DEFAULT '',
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	input_tokens INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	compute_micros INTEGER NOT NULL DEFAULT 0,
+	token_micros INTEGER NOT NULL DEFAULT 0,
+	agent_fee_micros INTEGER NOT NULL DEFAULT 0,
+	creator_earnings_micros INTEGER NOT NULL DEFAULT 0,
+	platform_fee_micros INTEGER NOT NULL DEFAULT 0,
+	total_micros INTEGER NOT NULL DEFAULT 0,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS stripe_customers (
+	user_id TEXT PRIMARY KEY,
+	stripe_customer_id TEXT NOT NULL UNIQUE,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS free_quota_usage (
+	user_id TEXT NOT NULL,
+	agent_id TEXT NOT NULL DEFAULT '',
+	period TEXT NOT NULL,
+	quota_limit INTEGER NOT NULL DEFAULT 0,
+	used INTEGER NOT NULL DEFAULT 0,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (user_id, agent_id, period)
+);
 `
 
 func (s *sqliteStore) migrateBilling() error {
@@ -294,4 +326,98 @@ func (s *sqliteStore) ListAuthorPayouts(ctx context.Context, authorUserID string
 		result = append(result, &p)
 	}
 	return result, rows.Err()
+}
+
+// --- Run Cost Breakdowns ---
+
+func (s *sqliteStore) UpsertRunCostBreakdown(ctx context.Context, b *model.RunCostBreakdown) error {
+	if b.CreatedAt.IsZero() {
+		b.CreatedAt = time.Now()
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO run_cost_breakdowns
+		 (run_id, pricing_model, duration_ms, input_tokens, output_tokens,
+		  compute_micros, token_micros, agent_fee_micros, creator_earnings_micros,
+		  platform_fee_micros, total_micros, created_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+		 ON CONFLICT(run_id) DO UPDATE SET
+		  pricing_model=excluded.pricing_model,
+		  duration_ms=excluded.duration_ms,
+		  input_tokens=excluded.input_tokens,
+		  output_tokens=excluded.output_tokens,
+		  compute_micros=excluded.compute_micros,
+		  token_micros=excluded.token_micros,
+		  agent_fee_micros=excluded.agent_fee_micros,
+		  creator_earnings_micros=excluded.creator_earnings_micros,
+		  platform_fee_micros=excluded.platform_fee_micros,
+		  total_micros=excluded.total_micros`,
+		b.RunID, b.PricingModel, b.DurationMs, b.InputTokens, b.OutputTokens,
+		b.ComputeMicros, b.TokenMicros, b.AgentFeeMicros, b.CreatorEarningsMicros,
+		b.PlatformFeeMicros, b.TotalMicros, b.CreatedAt)
+	return err
+}
+
+func (s *sqliteStore) GetRunCostBreakdown(ctx context.Context, runID string) (*model.RunCostBreakdown, error) {
+	var b model.RunCostBreakdown
+	err := s.db.QueryRowContext(ctx,
+		`SELECT run_id, pricing_model, duration_ms, input_tokens, output_tokens,
+		        compute_micros, token_micros, agent_fee_micros, creator_earnings_micros,
+		        platform_fee_micros, total_micros, created_at
+		 FROM run_cost_breakdowns WHERE run_id = ?`, runID).
+		Scan(&b.RunID, &b.PricingModel, &b.DurationMs, &b.InputTokens, &b.OutputTokens,
+			&b.ComputeMicros, &b.TokenMicros, &b.AgentFeeMicros, &b.CreatorEarningsMicros,
+			&b.PlatformFeeMicros, &b.TotalMicros, &b.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("run cost breakdown %s not found", runID)
+	}
+	return &b, err
+}
+
+// --- Stripe Customers ---
+
+func (s *sqliteStore) UpsertStripeCustomer(ctx context.Context, c *model.StripeCustomer) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO stripe_customers (user_id, stripe_customer_id, created_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(user_id) DO UPDATE SET stripe_customer_id=excluded.stripe_customer_id`,
+		c.UserID, c.StripeCustomerID, c.CreatedAt)
+	return err
+}
+
+func (s *sqliteStore) GetStripeCustomer(ctx context.Context, userID string) (*model.StripeCustomer, error) {
+	var c model.StripeCustomer
+	err := s.db.QueryRowContext(ctx,
+		`SELECT user_id, stripe_customer_id, created_at FROM stripe_customers WHERE user_id = ?`, userID).
+		Scan(&c.UserID, &c.StripeCustomerID, &c.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("stripe customer for user %s not found", userID)
+	}
+	return &c, err
+}
+
+// --- Free Quota ---
+
+func (s *sqliteStore) GetFreeQuotaUsage(ctx context.Context, userID, agentID, period string) (*model.FreeQuotaUsage, error) {
+	var q model.FreeQuotaUsage
+	err := s.db.QueryRowContext(ctx,
+		`SELECT user_id, agent_id, period, quota_limit, used, updated_at
+		 FROM free_quota_usage WHERE user_id=? AND agent_id=? AND period=?`,
+		userID, agentID, period).
+		Scan(&q.UserID, &q.AgentID, &q.Period, &q.Limit, &q.Used, &q.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return &model.FreeQuotaUsage{UserID: userID, AgentID: agentID, Period: period}, nil
+	}
+	return &q, err
+}
+
+func (s *sqliteStore) IncrementFreeQuotaUsage(ctx context.Context, userID, agentID, period string, limit int64) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO free_quota_usage (user_id, agent_id, period, quota_limit, used, updated_at)
+		 VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+		 ON CONFLICT(user_id, agent_id, period) DO UPDATE SET
+		  used = used + 1,
+		  quota_limit = excluded.quota_limit,
+		  updated_at = CURRENT_TIMESTAMP`,
+		userID, agentID, period, limit)
+	return err
 }

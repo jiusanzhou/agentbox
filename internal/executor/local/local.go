@@ -14,7 +14,7 @@ import (
 	"syscall"
 
 	"go.zoe.im/agentbox/internal/executor"
-	"go.zoe.im/agentbox/internal/runtime"
+	"go.zoe.im/agentbox/pkg/runtime"
 	"go.zoe.im/x"
 )
 

@@ -12,16 +12,22 @@ import (
 
 // billingData holds in-memory billing state.
 type billingData struct {
-	mu            sync.RWMutex
-	subscriptions map[string]*model.Subscription
-	usageRecords  []*model.UsageRecord
-	payouts       map[string]*model.AuthorPayout // key: authorUserID:period
+	mu              sync.RWMutex
+	subscriptions   map[string]*model.Subscription
+	usageRecords    []*model.UsageRecord
+	payouts         map[string]*model.AuthorPayout // key: authorUserID:period
+	costBreakdowns  map[string]*model.RunCostBreakdown
+	stripeCustomers map[string]*model.StripeCustomer
+	quotaUsage      map[string]*model.FreeQuotaUsage // key: userID:agentID:period
 }
 
 func newBillingData() *billingData {
 	return &billingData{
-		subscriptions: make(map[string]*model.Subscription),
-		payouts:       make(map[string]*model.AuthorPayout),
+		subscriptions:   make(map[string]*model.Subscription),
+		payouts:         make(map[string]*model.AuthorPayout),
+		costBreakdowns:  make(map[string]*model.RunCostBreakdown),
+		stripeCustomers: make(map[string]*model.StripeCustomer),
+		quotaUsage:      make(map[string]*model.FreeQuotaUsage),
 	}
 }
 
@@ -196,4 +202,75 @@ func (s *memoryStore) ListAuthorPayouts(_ context.Context, authorUserID string) 
 		}
 	}
 	return result, nil
+}
+
+// --- Run Cost Breakdowns ---
+
+func (s *memoryStore) UpsertRunCostBreakdown(_ context.Context, b *model.RunCostBreakdown) error {
+	s.billing.mu.Lock()
+	defer s.billing.mu.Unlock()
+	cp := *b
+	s.billing.costBreakdowns[b.RunID] = &cp
+	return nil
+}
+
+func (s *memoryStore) GetRunCostBreakdown(_ context.Context, runID string) (*model.RunCostBreakdown, error) {
+	s.billing.mu.RLock()
+	defer s.billing.mu.RUnlock()
+	b, ok := s.billing.costBreakdowns[runID]
+	if !ok {
+		return nil, fmt.Errorf("run cost breakdown %s not found", runID)
+	}
+	cp := *b
+	return &cp, nil
+}
+
+// --- Stripe Customers ---
+
+func (s *memoryStore) UpsertStripeCustomer(_ context.Context, c *model.StripeCustomer) error {
+	s.billing.mu.Lock()
+	defer s.billing.mu.Unlock()
+	cp := *c
+	s.billing.stripeCustomers[c.UserID] = &cp
+	return nil
+}
+
+func (s *memoryStore) GetStripeCustomer(_ context.Context, userID string) (*model.StripeCustomer, error) {
+	s.billing.mu.RLock()
+	defer s.billing.mu.RUnlock()
+	c, ok := s.billing.stripeCustomers[userID]
+	if !ok {
+		return nil, fmt.Errorf("stripe customer for user %s not found", userID)
+	}
+	cp := *c
+	return &cp, nil
+}
+
+// --- Free Quota ---
+
+func (s *memoryStore) GetFreeQuotaUsage(_ context.Context, userID, agentID, period string) (*model.FreeQuotaUsage, error) {
+	s.billing.mu.RLock()
+	defer s.billing.mu.RUnlock()
+	key := userID + ":" + agentID + ":" + period
+	q, ok := s.billing.quotaUsage[key]
+	if !ok {
+		return &model.FreeQuotaUsage{UserID: userID, AgentID: agentID, Period: period}, nil
+	}
+	cp := *q
+	return &cp, nil
+}
+
+func (s *memoryStore) IncrementFreeQuotaUsage(_ context.Context, userID, agentID, period string, limit int64) error {
+	s.billing.mu.Lock()
+	defer s.billing.mu.Unlock()
+	key := userID + ":" + agentID + ":" + period
+	q, ok := s.billing.quotaUsage[key]
+	if !ok {
+		q = &model.FreeQuotaUsage{UserID: userID, AgentID: agentID, Period: period, Limit: limit}
+		s.billing.quotaUsage[key] = q
+	}
+	q.Used++
+	q.Limit = limit
+	q.UpdatedAt = time.Now()
+	return nil
 }

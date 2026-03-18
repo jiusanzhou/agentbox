@@ -54,6 +54,20 @@ type Config struct {
 
 	// Webhook secret for verifying git push hooks
 	WebhookSecret string `json:"webhook_secret,omitempty" yaml:"webhook_secret" opts:"env=ABOX_WEBHOOK_SECRET"`
+
+	// Stripe configuration for marketplace billing
+	Stripe StripeConfig `json:"stripe,omitempty" yaml:"stripe"`
+}
+
+// StripeConfig holds Stripe API credentials and settings.
+type StripeConfig struct {
+	SecretKey      string `json:"secret_key,omitempty" yaml:"secret_key" opts:"env=STRIPE_SECRET_KEY"`
+	WebhookSecret  string `json:"webhook_secret,omitempty" yaml:"webhook_secret" opts:"env=STRIPE_WEBHOOK_SECRET"`
+	PublishableKey string `json:"publishable_key,omitempty" yaml:"publishable_key" opts:"env=STRIPE_PUBLISHABLE_KEY"`
+	SuccessURL     string `json:"success_url,omitempty" yaml:"success_url"`
+	CancelURL      string `json:"cancel_url,omitempty" yaml:"cancel_url"`
+	// FreeRunsPerMonth is the number of free runs granted to each user per month (platform-wide).
+	FreeRunsPerMonth int64 `json:"free_runs_per_month,omitempty" yaml:"free_runs_per_month"`
 }
 
 // RateLimitConfig holds rate limiting settings.

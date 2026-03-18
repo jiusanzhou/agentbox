@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"go.zoe.im/agentbox/internal/runtime"
+	"go.zoe.im/agentbox/pkg/runtime"
 )
 
 // installJob tracks a runtime install process.
