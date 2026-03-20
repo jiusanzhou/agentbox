@@ -12,6 +12,7 @@ type User struct {
 	Plan      string    `json:"plan"`
 	APIKey    string    `json:"-"`
 	GitHubID  string    `json:"github_id,omitempty"`
+	GoogleID  string    `json:"google_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

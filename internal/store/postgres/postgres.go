@@ -184,6 +184,28 @@ func migrate(pool *pgxpool.Pool) error {
 		return err
 	}
 
+	// IM Session tables
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS im_sessions (
+			id TEXT PRIMARY KEY,
+			binding_id TEXT NOT NULL DEFAULT '',
+			user_id TEXT NOT NULL DEFAULT '',
+			platform TEXT NOT NULL,
+			platform_chat_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			agent_id TEXT NOT NULL DEFAULT '',
+			active BOOLEAN NOT NULL DEFAULT TRUE,
+			last_message_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_im_sessions_chat ON im_sessions(platform, platform_chat_id);
+		CREATE INDEX IF NOT EXISTS idx_im_sessions_user ON im_sessions(user_id);
+		CREATE INDEX IF NOT EXISTS idx_im_sessions_session ON im_sessions(session_id);
+	`)
+	if err != nil {
+		return err
+	}
+
 	// Schedule & Team tables
 	_, err = pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schedules (

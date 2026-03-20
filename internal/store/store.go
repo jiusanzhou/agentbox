@@ -98,6 +98,14 @@ type Store interface {
 	GetBindingCode(ctx context.Context, code string) (*model.BindingCode, error)
 	DeleteBindingCode(ctx context.Context, code string) error
 
+	// IM Session methods
+	CreateIMSession(ctx context.Context, session *model.IMSession) error
+	GetIMSession(ctx context.Context, id string) (*model.IMSession, error)
+	GetIMSessionByChat(ctx context.Context, platform, chatID string) (*model.IMSession, error)
+	ListIMSessionsByUser(ctx context.Context, userID string) ([]*model.IMSession, error)
+	UpdateIMSession(ctx context.Context, session *model.IMSession) error
+	DeleteIMSession(ctx context.Context, id string) error
+
 	// Workflow methods
 	CreateWorkflow(ctx context.Context, w *model.Workflow) error
 	GetWorkflow(ctx context.Context, id string) (*model.Workflow, error)

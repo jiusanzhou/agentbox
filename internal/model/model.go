@@ -95,6 +95,20 @@ type IMBinding struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+// IMSession links a platform chat to a persistent ABox session.
+type IMSession struct {
+	ID             string     `json:"id"`
+	BindingID      string     `json:"binding_id"`
+	UserID         string     `json:"user_id"`
+	Platform       string     `json:"platform"`
+	PlatformChatID string     `json:"platform_chat_id"`
+	SessionID      string     `json:"session_id"`
+	AgentID        string     `json:"agent_id,omitempty"`
+	Active         bool       `json:"active"`
+	LastMessageAt  *time.Time `json:"last_message_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
 // BindingCode is a short-lived code for verifying IM bindings.
 type BindingCode struct {
 	Code      string    `json:"code"`

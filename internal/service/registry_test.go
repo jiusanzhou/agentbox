@@ -200,6 +200,20 @@ func (s *registryMockStore) GetBindingCode(context.Context, string) (*model.Bind
 }
 func (s *registryMockStore) DeleteBindingCode(context.Context, string) error { return nil }
 
+// --- IM Session stubs ---
+func (s *registryMockStore) CreateIMSession(context.Context, *model.IMSession) error { return nil }
+func (s *registryMockStore) GetIMSession(context.Context, string) (*model.IMSession, error) {
+	return nil, errRegistryNotFound
+}
+func (s *registryMockStore) GetIMSessionByChat(context.Context, string, string) (*model.IMSession, error) {
+	return nil, errRegistryNotFound
+}
+func (s *registryMockStore) ListIMSessionsByUser(context.Context, string) ([]*model.IMSession, error) {
+	return nil, nil
+}
+func (s *registryMockStore) UpdateIMSession(context.Context, *model.IMSession) error { return nil }
+func (s *registryMockStore) DeleteIMSession(context.Context, string) error           { return nil }
+
 // --- Workflow stubs ---
 func (s *registryMockStore) CreateWorkflow(context.Context, *model.Workflow) error   { return nil }
 func (s *registryMockStore) GetWorkflow(context.Context, string) (*model.Workflow, error) {

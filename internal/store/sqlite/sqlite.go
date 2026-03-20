@@ -247,6 +247,28 @@ func migrate(db *sql.DB) error {
 			expires_at DATETIME NOT NULL
 		);
 	`)
+	if err != nil {
+		return err
+	}
+
+	// IM Session tables
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS im_sessions (
+			id TEXT PRIMARY KEY,
+			binding_id TEXT NOT NULL DEFAULT '',
+			user_id TEXT NOT NULL DEFAULT '',
+			platform TEXT NOT NULL,
+			platform_chat_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			agent_id TEXT NOT NULL DEFAULT '',
+			active BOOLEAN NOT NULL DEFAULT 1,
+			last_message_at DATETIME,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_im_sessions_chat ON im_sessions(platform, platform_chat_id);
+		CREATE INDEX IF NOT EXISTS idx_im_sessions_user ON im_sessions(user_id);
+		CREATE INDEX IF NOT EXISTS idx_im_sessions_session ON im_sessions(session_id);
+	`)
 	return err
 }
 

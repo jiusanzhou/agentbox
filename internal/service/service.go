@@ -40,6 +40,7 @@ import (
 	_ "go.zoe.im/agentbox/internal/executor/docker"
 	_ "go.zoe.im/agentbox/internal/executor/e2b"
 	_ "go.zoe.im/agentbox/internal/executor/local"
+	_ "go.zoe.im/agentbox/internal/executor/nanobox"
 	_ "go.zoe.im/agentbox/internal/executor/tunnel"
 	_ "go.zoe.im/agentbox/internal/storage/local"
 	_ "go.zoe.im/agentbox/internal/store/memory"
@@ -51,6 +52,7 @@ import (
 	_ "go.zoe.im/agentbox/internal/channel/feishu"
 	_ "go.zoe.im/agentbox/internal/channel/slack"
 	_ "go.zoe.im/agentbox/internal/channel/telegram"
+	_ "go.zoe.im/agentbox/internal/channel/wechat"
 	_ "go.zoe.im/agentbox/internal/channel/wecom"
 	_ "go.zoe.im/agentbox/internal/channel/webhook"
 
@@ -295,6 +297,17 @@ func New(cfg *config.Config) (*Service, error) {
 		}
 		mux.HandleFunc("GET /api/v1/auth/github", authInst.HandleGitHubLogin(ghCfg))
 		mux.HandleFunc("GET /api/v1/auth/github/callback", authInst.HandleGitHubCallback(ghCfg))
+	}
+
+	// Google OAuth endpoints
+	if cfg.Auth.GoogleClientID != "" {
+		googleCfg := auth.GoogleConfig{
+			ClientID:     cfg.Auth.GoogleClientID,
+			ClientSecret: cfg.Auth.GoogleClientSecret,
+			CallbackURL:  cfg.Auth.GoogleCallbackURL,
+		}
+		mux.HandleFunc("GET /api/v1/auth/google", authInst.HandleGoogleLogin(googleCfg))
+		mux.HandleFunc("GET /api/v1/auth/google/callback", authInst.HandleGoogleCallback(googleCfg))
 	}
 
 	// Skills endpoint

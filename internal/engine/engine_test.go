@@ -168,6 +168,20 @@ func (m *mockStore) GetBindingCode(context.Context, string) (*model.BindingCode,
 }
 func (m *mockStore) DeleteBindingCode(context.Context, string) error { return nil }
 
+// --- IM Session stubs ---
+func (m *mockStore) CreateIMSession(context.Context, *model.IMSession) error { return nil }
+func (m *mockStore) GetIMSession(context.Context, string) (*model.IMSession, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockStore) GetIMSessionByChat(context.Context, string, string) (*model.IMSession, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockStore) ListIMSessionsByUser(context.Context, string) ([]*model.IMSession, error) {
+	return nil, nil
+}
+func (m *mockStore) UpdateIMSession(context.Context, *model.IMSession) error { return nil }
+func (m *mockStore) DeleteIMSession(context.Context, string) error           { return nil }
+
 // --- Workflow stubs ---
 func (m *mockStore) CreateWorkflow(context.Context, *model.Workflow) error   { return nil }
 func (m *mockStore) GetWorkflow(context.Context, string) (*model.Workflow, error) {

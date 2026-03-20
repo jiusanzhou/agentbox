@@ -116,6 +116,11 @@ func (r *Router) handle(ctx context.Context, msg *Message) error {
 	case strings.HasPrefix(text, "/bind "):
 		code := strings.TrimPrefix(text, "/bind ")
 		return r.handleBind(ctx, ch, msg, strings.TrimSpace(code))
+	case strings.HasPrefix(text, "/switch "):
+		agentID := strings.TrimSpace(strings.TrimPrefix(text, "/switch "))
+		return r.handleSwitch(ctx, ch, msg, agentID)
+	case text == "/sessions":
+		return r.handleSessions(ctx, ch, msg)
 	}
 
 	// Regular message — route to session.
@@ -123,11 +128,15 @@ func (r *Router) handle(ctx context.Context, msg *Message) error {
 }
 
 func (r *Router) handleMessage(ctx context.Context, ch Channel, msg *Message, text string) error {
-	sessionID, err := r.getOrCreateSession(ctx, msg.ChatID)
+	platform := r.platformFromMsg(msg)
+	sessionID, err := r.getOrCreateSession(ctx, msg.ChatID, platform)
 	if err != nil {
 		r.logger.Error("failed to get/create session", "chat_id", msg.ChatID, "err", err)
 		return r.send(ctx, ch, msg.ChatID, "Failed to create session: "+err.Error(), msg.ID)
 	}
+
+	// Update LastMessageAt on the IMSession.
+	r.updateLastMessage(ctx, platform, msg.ChatID)
 
 	// Stream tokens with debounced message editing.
 	return r.streamResponse(ctx, ch, msg, sessionID, text)
@@ -326,16 +335,22 @@ func (r *Router) findChannel(chatID string) Channel {
 }
 
 func (r *Router) handleReset(ctx context.Context, ch Channel, msg *Message) error {
+	platform := r.platformFromMsg(msg)
+
+	// Deactivate old IMSession if it exists.
+	oldIMSession, err := r.store.GetIMSessionByChat(ctx, platform, msg.ChatID)
+	if err == nil && oldIMSession != nil {
+		oldIMSession.Active = false
+		_ = r.store.UpdateIMSession(ctx, oldIMSession)
+		_ = r.engine.StopSession(ctx, oldIMSession.SessionID)
+	}
+
+	// Also clean in-memory cache.
 	r.mu.Lock()
-	oldID, exists := r.sessions[msg.ChatID]
 	delete(r.sessions, msg.ChatID)
 	r.mu.Unlock()
 
-	if exists {
-		_ = r.engine.StopSession(ctx, oldID)
-	}
-
-	sessionID, err := r.createSession(ctx, msg.ChatID, "")
+	sessionID, err := r.createSession(ctx, msg.ChatID, platform, "")
 	if err != nil {
 		return r.send(ctx, ch, msg.ChatID, "Failed to create session: "+err.Error(), msg.ID)
 	}
@@ -344,16 +359,30 @@ func (r *Router) handleReset(ctx context.Context, ch Channel, msg *Message) erro
 }
 
 func (r *Router) handleStop(ctx context.Context, ch Channel, msg *Message) error {
+	platform := r.platformFromMsg(msg)
+
+	// Deactivate IMSession in store.
+	imSession, err := r.store.GetIMSessionByChat(ctx, platform, msg.ChatID)
+	if err == nil && imSession != nil {
+		imSession.Active = false
+		_ = r.store.UpdateIMSession(ctx, imSession)
+		_ = r.engine.StopSession(ctx, imSession.SessionID)
+	}
+
 	r.mu.Lock()
 	sessionID, exists := r.sessions[msg.ChatID]
 	delete(r.sessions, msg.ChatID)
 	r.mu.Unlock()
 
-	if !exists {
+	if !exists && imSession == nil {
 		return r.send(ctx, ch, msg.ChatID, "No active session.", msg.ID)
 	}
 
-	_ = r.engine.StopSession(ctx, sessionID)
+	// Stop engine session from in-memory cache if different from IMSession.
+	if exists && (imSession == nil || imSession.SessionID != sessionID) {
+		_ = r.engine.StopSession(ctx, sessionID)
+	}
+
 	return r.send(ctx, ch, msg.ChatID, "Session stopped.", msg.ID)
 }
 
@@ -377,17 +406,22 @@ func (r *Router) handleStatus(ctx context.Context, ch Channel, msg *Message) err
 }
 
 func (r *Router) handleAgent(ctx context.Context, ch Channel, msg *Message, prompt string) error {
-	// Stop existing session if any.
+	platform := r.platformFromMsg(msg)
+
+	// Deactivate old IMSession.
+	oldIMSession, err := r.store.GetIMSessionByChat(ctx, platform, msg.ChatID)
+	if err == nil && oldIMSession != nil {
+		oldIMSession.Active = false
+		_ = r.store.UpdateIMSession(ctx, oldIMSession)
+		_ = r.engine.StopSession(ctx, oldIMSession.SessionID)
+	}
+
+	// Also clean in-memory cache.
 	r.mu.Lock()
-	oldID, exists := r.sessions[msg.ChatID]
 	delete(r.sessions, msg.ChatID)
 	r.mu.Unlock()
 
-	if exists {
-		_ = r.engine.StopSession(ctx, oldID)
-	}
-
-	sessionID, err := r.createSession(ctx, msg.ChatID, prompt)
+	sessionID, err := r.createSession(ctx, msg.ChatID, platform, prompt)
 	if err != nil {
 		return r.send(ctx, ch, msg.ChatID, "Failed to create session: "+err.Error(), msg.ID)
 	}
@@ -395,7 +429,8 @@ func (r *Router) handleAgent(ctx context.Context, ch Channel, msg *Message, prom
 	return r.send(ctx, ch, msg.ChatID, "Session started with custom agent: "+sessionID, msg.ID)
 }
 
-func (r *Router) getOrCreateSession(ctx context.Context, chatID string) (string, error) {
+func (r *Router) getOrCreateSession(ctx context.Context, chatID, platform string) (string, error) {
+	// First check in-memory cache.
 	r.mu.RLock()
 	sessionID, exists := r.sessions[chatID]
 	r.mu.RUnlock()
@@ -404,10 +439,20 @@ func (r *Router) getOrCreateSession(ctx context.Context, chatID string) (string,
 		return sessionID, nil
 	}
 
-	return r.createSession(ctx, chatID, "")
+	// Check store for persistent IMSession.
+	imSession, err := r.store.GetIMSessionByChat(ctx, platform, chatID)
+	if err == nil && imSession != nil {
+		// Cache it in memory.
+		r.mu.Lock()
+		r.sessions[chatID] = imSession.SessionID
+		r.mu.Unlock()
+		return imSession.SessionID, nil
+	}
+
+	return r.createSession(ctx, chatID, platform, "")
 }
 
-func (r *Router) createSession(ctx context.Context, chatID string, agentFile string) (string, error) {
+func (r *Router) createSession(ctx context.Context, chatID string, platform string, agentFile string) (string, error) {
 	if agentFile == "" {
 		agentFile = "default"
 	}
@@ -428,6 +473,35 @@ func (r *Router) createSession(ctx context.Context, chatID string, agentFile str
 	r.sessions[chatID] = id
 	r.mu.Unlock()
 
+	// Resolve the user from IM binding (best-effort).
+	userID := ""
+	bindingID := ""
+	if platform != "" {
+		binding, err := r.store.GetIMBindingByPlatform(ctx, platform, chatID)
+		if err == nil && binding != nil {
+			userID = binding.UserID
+			bindingID = binding.ID
+		}
+	}
+
+	// Persist the IMSession.
+	now := time.Now()
+	imSession := &model.IMSession{
+		ID:             shortID() + shortID(),
+		BindingID:      bindingID,
+		UserID:         userID,
+		Platform:       platform,
+		PlatformChatID: chatID,
+		SessionID:      id,
+		AgentID:        agentFile,
+		Active:         true,
+		LastMessageAt:  &now,
+		CreatedAt:      now,
+	}
+	if err := r.store.CreateIMSession(ctx, imSession); err != nil {
+		r.logger.Error("failed to persist im session", "err", err)
+	}
+
 	r.logger.Info("session created", "chat_id", chatID, "session_id", id)
 	return id, nil
 }
@@ -446,6 +520,103 @@ func shortID() string {
 	b := make([]byte, 4)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func (r *Router) handleSwitch(ctx context.Context, ch Channel, msg *Message, agentID string) error {
+	if agentID == "" {
+		return r.send(ctx, ch, msg.ChatID, "Usage: /switch <agent-id>", msg.ID)
+	}
+
+	platform := r.platformFromMsg(msg)
+
+	// Deactivate old IMSession.
+	oldIMSession, err := r.store.GetIMSessionByChat(ctx, platform, msg.ChatID)
+	if err == nil && oldIMSession != nil {
+		oldIMSession.Active = false
+		_ = r.store.UpdateIMSession(ctx, oldIMSession)
+		_ = r.engine.StopSession(ctx, oldIMSession.SessionID)
+	}
+
+	// Clean in-memory cache.
+	r.mu.Lock()
+	delete(r.sessions, msg.ChatID)
+	r.mu.Unlock()
+
+	sessionID, err := r.createSession(ctx, msg.ChatID, platform, agentID)
+	if err != nil {
+		return r.send(ctx, ch, msg.ChatID, "Failed to switch agent: "+err.Error(), msg.ID)
+	}
+
+	return r.send(ctx, ch, msg.ChatID, fmt.Sprintf("Switched to agent `%s`. Session: %s", agentID, sessionID), msg.ID)
+}
+
+func (r *Router) handleSessions(ctx context.Context, ch Channel, msg *Message) error {
+	platform := r.platformFromMsg(msg)
+
+	// Resolve user from IM binding.
+	userID := ""
+	binding, err := r.store.GetIMBindingByPlatform(ctx, platform, msg.ChatID)
+	if err == nil && binding != nil {
+		userID = binding.UserID
+	}
+
+	if userID == "" {
+		// No binding -- show current session only.
+		r.mu.RLock()
+		sessionID, exists := r.sessions[msg.ChatID]
+		r.mu.RUnlock()
+		if !exists {
+			return r.send(ctx, ch, msg.ChatID, "No active sessions. Send a message to start one.", msg.ID)
+		}
+		return r.send(ctx, ch, msg.ChatID, fmt.Sprintf("Active session: %s\n(Link your account with /bind for full session history)", sessionID), msg.ID)
+	}
+
+	sessions, err := r.store.ListIMSessionsByUser(ctx, userID)
+	if err != nil {
+		return r.send(ctx, ch, msg.ChatID, "Failed to list sessions: "+err.Error(), msg.ID)
+	}
+
+	if len(sessions) == 0 {
+		return r.send(ctx, ch, msg.ChatID, "No sessions found.", msg.ID)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Your sessions:\n")
+	for _, sess := range sessions {
+		status := "inactive"
+		if sess.Active {
+			status = "active"
+		}
+		agent := sess.AgentID
+		if agent == "" {
+			agent = "default"
+		}
+		line := fmt.Sprintf("- `%s` [%s] agent:%s", sess.SessionID, status, agent)
+		if sess.LastMessageAt != nil {
+			line += fmt.Sprintf(" (last: %s)", sess.LastMessageAt.Format("01-02 15:04"))
+		}
+		sb.WriteString(line + "\n")
+	}
+	return r.send(ctx, ch, msg.ChatID, sb.String(), msg.ID)
+}
+
+func (r *Router) platformFromMsg(msg *Message) string {
+	if msg.Extra != nil {
+		if chName, ok := msg.Extra["channel"]; ok {
+			return chName
+		}
+	}
+	return "unknown"
+}
+
+func (r *Router) updateLastMessage(ctx context.Context, platform, chatID string) {
+	imSession, err := r.store.GetIMSessionByChat(ctx, platform, chatID)
+	if err != nil || imSession == nil {
+		return
+	}
+	now := time.Now()
+	imSession.LastMessageAt = &now
+	_ = r.store.UpdateIMSession(ctx, imSession)
 }
 
 func (r *Router) handleBind(ctx context.Context, ch Channel, msg *Message, code string) error {

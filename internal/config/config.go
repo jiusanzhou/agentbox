@@ -94,6 +94,11 @@ type AuthConfig struct {
 	GitHubClientID     string `json:"github_client_id,omitempty" yaml:"github_client_id" opts:"env=ABOX_GITHUB_CLIENT_ID"`
 	GitHubClientSecret string `json:"github_client_secret,omitempty" yaml:"github_client_secret" opts:"env=ABOX_GITHUB_CLIENT_SECRET"`
 	GitHubCallbackURL  string `json:"github_callback_url,omitempty" yaml:"github_callback_url" opts:"env=ABOX_GITHUB_CALLBACK_URL"`
+
+	// Google OAuth
+	GoogleClientID     string `json:"google_client_id,omitempty" yaml:"google_client_id" opts:"env=ABOX_GOOGLE_CLIENT_ID"`
+	GoogleClientSecret string `json:"google_client_secret,omitempty" yaml:"google_client_secret" opts:"env=ABOX_GOOGLE_CLIENT_SECRET"`
+	GoogleCallbackURL  string `json:"google_callback_url,omitempty" yaml:"google_callback_url" opts:"env=ABOX_GOOGLE_CALLBACK_URL"`
 }
 
 // CORSConfig holds CORS settings.

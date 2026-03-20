@@ -26,6 +26,7 @@ type memoryStore struct {
 	billing       *billingData
 	imBindings    map[string]*model.IMBinding
 	bindingCodes  map[string]*model.BindingCode
+	imSessions    map[string]*model.IMSession
 	workflows     map[string]*model.Workflow
 	workflowRuns  map[string]*model.WorkflowRun
 	schedules     map[string]*model.Schedule
@@ -42,6 +43,7 @@ func New() store.Store {
 		billing:      newBillingData(),
 		imBindings:   make(map[string]*model.IMBinding),
 		bindingCodes: make(map[string]*model.BindingCode),
+		imSessions:   make(map[string]*model.IMSession),
 		workflows:    make(map[string]*model.Workflow),
 		workflowRuns: make(map[string]*model.WorkflowRun),
 		schedules:    make(map[string]*model.Schedule),
