@@ -180,6 +180,45 @@ func migrate(pool *pgxpool.Pool) error {
 			expires_at TIMESTAMPTZ NOT NULL
 		);
 	`)
+	if err != nil {
+		return err
+	}
+
+	// Schedule & Team tables
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS schedules (
+			id          TEXT PRIMARY KEY,
+			user_id     TEXT NOT NULL,
+			name        TEXT NOT NULL DEFAULT '',
+			agent_id    TEXT NOT NULL DEFAULT '',
+			runtime     TEXT NOT NULL DEFAULT '',
+			cron_expr   TEXT NOT NULL,
+			timezone    TEXT NOT NULL DEFAULT 'UTC',
+			input       TEXT NOT NULL DEFAULT '',
+			enabled     BOOLEAN NOT NULL DEFAULT true,
+			last_run_at TIMESTAMPTZ,
+			next_run_at TIMESTAMPTZ,
+			created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_schedules_user_id ON schedules(user_id);
+		CREATE INDEX IF NOT EXISTS idx_schedules_next_run ON schedules(next_run_at);
+
+		CREATE TABLE IF NOT EXISTS teams (
+			id         TEXT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			owner_id   TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS team_members (
+			team_id   TEXT NOT NULL,
+			user_id   TEXT NOT NULL,
+			role      TEXT NOT NULL DEFAULT 'member',
+			joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (team_id, user_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+	`)
 	return err
 }
 

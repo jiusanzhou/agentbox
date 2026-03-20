@@ -202,6 +202,39 @@ func (m *mockStore) ListWorkflowRuns(context.Context, string) ([]*model.Workflow
 	return nil, nil
 }
 
+// --- Schedule stubs ---
+func (m *mockStore) CreateSchedule(context.Context, *model.Schedule) error { return nil }
+func (m *mockStore) GetSchedule(context.Context, string) (*model.Schedule, error) {
+	return nil, errNotFound
+}
+func (m *mockStore) ListSchedules(context.Context, string) ([]*model.Schedule, error) {
+	return nil, nil
+}
+func (m *mockStore) UpdateSchedule(context.Context, *model.Schedule) error { return nil }
+func (m *mockStore) DeleteSchedule(context.Context, string) error          { return nil }
+func (m *mockStore) ListDueSchedules(context.Context, time.Time) ([]*model.Schedule, error) {
+	return nil, nil
+}
+
+// --- Team stubs ---
+func (m *mockStore) CreateTeam(context.Context, *model.Team) error { return nil }
+func (m *mockStore) GetTeam(context.Context, string) (*model.Team, error) {
+	return nil, errNotFound
+}
+func (m *mockStore) ListTeamsByUser(context.Context, string) ([]*model.Team, error) {
+	return nil, nil
+}
+func (m *mockStore) UpdateTeam(context.Context, *model.Team) error { return nil }
+func (m *mockStore) DeleteTeam(context.Context, string) error      { return nil }
+func (m *mockStore) AddTeamMember(context.Context, *model.TeamMember) error { return nil }
+func (m *mockStore) RemoveTeamMember(context.Context, string, string) error { return nil }
+func (m *mockStore) ListTeamMembers(context.Context, string) ([]*model.TeamMember, error) {
+	return nil, nil
+}
+func (m *mockStore) GetTeamMember(context.Context, string, string) (*model.TeamMember, error) {
+	return nil, errNotFound
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

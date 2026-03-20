@@ -1,0 +1,17 @@
+{
+  "name": "@agentbox/sdk",
+  "version": "0.1.0",
+  "description": "AgentBox TypeScript SDK for programmatic agent management",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["agentbox", "ai", "agents", "sdk"],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

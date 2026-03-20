@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 
+	"go.zoe.im/agentbox/pkg/plugin"
 	"go.zoe.im/x"
 )
 
@@ -57,6 +58,9 @@ type Config struct {
 
 	// Stripe configuration for marketplace billing
 	Stripe StripeConfig `json:"stripe,omitempty" yaml:"stripe"`
+
+	// Plugins to load at startup
+	Plugins []plugin.PluginConfig `json:"plugins,omitempty" yaml:"plugins"`
 }
 
 // StripeConfig holds Stripe API credentials and settings.

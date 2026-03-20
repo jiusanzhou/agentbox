@@ -27,6 +27,8 @@ import (
 	"go.zoe.im/agentbox/internal/middleware"
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/agentbox/internal/ratelimit"
+	"go.zoe.im/agentbox/internal/scheduler"
+	"go.zoe.im/agentbox/pkg/plugin"
 	"go.zoe.im/agentbox/pkg/runtime"
 	"go.zoe.im/agentbox/internal/storage"
 	"go.zoe.im/agentbox/internal/store"
@@ -107,6 +109,8 @@ type Service struct {
 	installs     *installManager
 	logger       *slog.Logger
 	stripe       *billing.StripeClient
+	scheduler    *scheduler.Scheduler
+	plugins      *plugin.Registry
 	startedAt    time.Time
 }
 
@@ -191,6 +195,20 @@ func New(cfg *config.Config) (*Service, error) {
 		authLimiter: auth.NewAuthRateLimiter(),
 		installs:    newInstallManager(),
 		logger:      logger,
+	}
+
+	// Initialize scheduler
+	svc.scheduler = scheduler.New(s, logger)
+
+	// Initialize plugin registry and load plugins
+	svc.plugins = plugin.NewRegistry(logger)
+	if len(cfg.Plugins) > 0 {
+		loader := plugin.NewLoader(svc.plugins, logger)
+		for _, pc := range cfg.Plugins {
+			if err := loader.LoadFromConfig(pc); err != nil {
+				logger.Warn("failed to load plugin", "name", pc.Name, "err", err)
+			}
+		}
 	}
 
 	// Initialize Stripe client if credentials are configured
@@ -332,6 +350,22 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("GET /api/v1/im/bindings", svc.ListIMBindings)
 	mux.HandleFunc("DELETE /api/v1/im/bindings/{id}", svc.DeleteIMBinding)
 
+	// Schedule endpoints
+	mux.HandleFunc("POST /api/v1/schedules", svc.CreateSchedule)
+	mux.HandleFunc("GET /api/v1/schedules", svc.ListSchedules)
+	mux.HandleFunc("GET /api/v1/schedules/{id}", svc.GetSchedule)
+	mux.HandleFunc("PUT /api/v1/schedules/{id}", svc.UpdateSchedule)
+	mux.HandleFunc("DELETE /api/v1/schedules/{id}", svc.DeleteSchedule)
+	mux.HandleFunc("POST /api/v1/schedules/{id}/trigger", svc.TriggerSchedule)
+
+	// Team endpoints
+	mux.HandleFunc("POST /api/v1/teams", svc.CreateTeam)
+	mux.HandleFunc("GET /api/v1/teams", svc.ListTeams)
+	mux.HandleFunc("GET /api/v1/teams/{id}", svc.GetTeam)
+	mux.HandleFunc("POST /api/v1/teams/{id}/members", svc.AddTeamMember)
+	mux.HandleFunc("DELETE /api/v1/teams/{id}/members/{user_id}", svc.RemoveTeamMember)
+	mux.HandleFunc("GET /api/v1/teams/{id}/members", svc.ListTeamMembers)
+
 	// Register endpoints via talk reflection
 	if err := server.Register(svc); err != nil {
 		return nil, fmt.Errorf("register endpoints: %w", err)
@@ -427,6 +461,11 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	go s.engine.StartCleanup(ctx, ttl, cleanupInterval)
 	s.logger.Info("session cleanup started", "ttl", ttl, "interval", cleanupInterval)
+
+	// Start the cron scheduler
+	if s.scheduler != nil {
+		s.scheduler.Start(ctx)
+	}
 
 	// Security headers middleware
 	handler = securityHeadersMiddleware(handler)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/agentbox/internal/store"
@@ -27,6 +28,9 @@ type memoryStore struct {
 	bindingCodes  map[string]*model.BindingCode
 	workflows     map[string]*model.Workflow
 	workflowRuns  map[string]*model.WorkflowRun
+	schedules     map[string]*model.Schedule
+	teams         map[string]*model.Team
+	teamMembers   map[string][]*model.TeamMember
 }
 
 func New() store.Store {
@@ -40,6 +44,9 @@ func New() store.Store {
 		bindingCodes: make(map[string]*model.BindingCode),
 		workflows:    make(map[string]*model.Workflow),
 		workflowRuns: make(map[string]*model.WorkflowRun),
+		schedules:    make(map[string]*model.Schedule),
+		teams:        make(map[string]*model.Team),
+		teamMembers:  make(map[string][]*model.TeamMember),
 	}
 }
 
@@ -307,4 +314,169 @@ func (s *memoryStore) IncrementAgentDNADownloads(_ context.Context, id string) e
 	}
 	a.Downloads++
 	return nil
+}
+
+// --- Schedule methods ---
+
+func (s *memoryStore) CreateSchedule(_ context.Context, schedule *model.Schedule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.schedules[schedule.ID]; exists {
+		return fmt.Errorf("schedule %s already exists", schedule.ID)
+	}
+	s.schedules[schedule.ID] = schedule
+	return nil
+}
+
+func (s *memoryStore) GetSchedule(_ context.Context, id string) (*model.Schedule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	schedule, ok := s.schedules[id]
+	if !ok {
+		return nil, fmt.Errorf("schedule %s not found", id)
+	}
+	return schedule, nil
+}
+
+func (s *memoryStore) ListSchedules(_ context.Context, userID string) ([]*model.Schedule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*model.Schedule
+	for _, sc := range s.schedules {
+		if sc.UserID == userID {
+			result = append(result, sc)
+		}
+	}
+	return result, nil
+}
+
+func (s *memoryStore) UpdateSchedule(_ context.Context, schedule *model.Schedule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.schedules[schedule.ID]; !exists {
+		return fmt.Errorf("schedule %s not found", schedule.ID)
+	}
+	s.schedules[schedule.ID] = schedule
+	return nil
+}
+
+func (s *memoryStore) DeleteSchedule(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.schedules, id)
+	return nil
+}
+
+func (s *memoryStore) ListDueSchedules(_ context.Context, now time.Time) ([]*model.Schedule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*model.Schedule
+	for _, sc := range s.schedules {
+		if sc.Enabled && sc.NextRunAt != nil && !sc.NextRunAt.After(now) {
+			result = append(result, sc)
+		}
+	}
+	return result, nil
+}
+
+// --- Team methods ---
+
+func (s *memoryStore) CreateTeam(_ context.Context, team *model.Team) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.teams[team.ID]; exists {
+		return fmt.Errorf("team %s already exists", team.ID)
+	}
+	s.teams[team.ID] = team
+	return nil
+}
+
+func (s *memoryStore) GetTeam(_ context.Context, id string) (*model.Team, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	team, ok := s.teams[id]
+	if !ok {
+		return nil, fmt.Errorf("team %s not found", id)
+	}
+	return team, nil
+}
+
+func (s *memoryStore) ListTeamsByUser(_ context.Context, userID string) ([]*model.Team, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*model.Team
+	for teamID, members := range s.teamMembers {
+		for _, m := range members {
+			if m.UserID == userID {
+				if team, ok := s.teams[teamID]; ok {
+					result = append(result, team)
+				}
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *memoryStore) UpdateTeam(_ context.Context, team *model.Team) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.teams[team.ID]; !exists {
+		return fmt.Errorf("team %s not found", team.ID)
+	}
+	s.teams[team.ID] = team
+	return nil
+}
+
+func (s *memoryStore) DeleteTeam(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.teams, id)
+	delete(s.teamMembers, id)
+	return nil
+}
+
+func (s *memoryStore) AddTeamMember(_ context.Context, member *model.TeamMember) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.teamMembers[member.TeamID] {
+		if m.UserID == member.UserID {
+			return fmt.Errorf("user %s is already a member of team %s", member.UserID, member.TeamID)
+		}
+	}
+	s.teamMembers[member.TeamID] = append(s.teamMembers[member.TeamID], member)
+	return nil
+}
+
+func (s *memoryStore) RemoveTeamMember(_ context.Context, teamID, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	members := s.teamMembers[teamID]
+	for i, m := range members {
+		if m.UserID == userID {
+			s.teamMembers[teamID] = append(members[:i], members[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("member %s not found in team %s", userID, teamID)
+}
+
+func (s *memoryStore) ListTeamMembers(_ context.Context, teamID string) ([]*model.TeamMember, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	members := s.teamMembers[teamID]
+	result := make([]*model.TeamMember, len(members))
+	copy(result, members)
+	return result, nil
+}
+
+func (s *memoryStore) GetTeamMember(_ context.Context, teamID, userID string) (*model.TeamMember, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, m := range s.teamMembers[teamID] {
+		if m.UserID == userID {
+			return m, nil
+		}
+	}
+	return nil, fmt.Errorf("member %s not found in team %s", userID, teamID)
 }

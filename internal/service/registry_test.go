@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"go.zoe.im/agentbox/internal/auth"
 	"go.zoe.im/agentbox/internal/config"
@@ -220,6 +221,39 @@ func (s *registryMockStore) UpdateWorkflowRun(context.Context, *model.WorkflowRu
 }
 func (s *registryMockStore) ListWorkflowRuns(context.Context, string) ([]*model.WorkflowRun, error) {
 	return nil, nil
+}
+
+// --- Schedule stubs ---
+func (s *registryMockStore) CreateSchedule(context.Context, *model.Schedule) error { return nil }
+func (s *registryMockStore) GetSchedule(context.Context, string) (*model.Schedule, error) {
+	return nil, errRegistryNotFound
+}
+func (s *registryMockStore) ListSchedules(context.Context, string) ([]*model.Schedule, error) {
+	return nil, nil
+}
+func (s *registryMockStore) UpdateSchedule(context.Context, *model.Schedule) error { return nil }
+func (s *registryMockStore) DeleteSchedule(context.Context, string) error          { return nil }
+func (s *registryMockStore) ListDueSchedules(context.Context, time.Time) ([]*model.Schedule, error) {
+	return nil, nil
+}
+
+// --- Team stubs ---
+func (s *registryMockStore) CreateTeam(context.Context, *model.Team) error { return nil }
+func (s *registryMockStore) GetTeam(context.Context, string) (*model.Team, error) {
+	return nil, errRegistryNotFound
+}
+func (s *registryMockStore) ListTeamsByUser(context.Context, string) ([]*model.Team, error) {
+	return nil, nil
+}
+func (s *registryMockStore) UpdateTeam(context.Context, *model.Team) error { return nil }
+func (s *registryMockStore) DeleteTeam(context.Context, string) error      { return nil }
+func (s *registryMockStore) AddTeamMember(context.Context, *model.TeamMember) error { return nil }
+func (s *registryMockStore) RemoveTeamMember(context.Context, string, string) error { return nil }
+func (s *registryMockStore) ListTeamMembers(context.Context, string) ([]*model.TeamMember, error) {
+	return nil, nil
+}
+func (s *registryMockStore) GetTeamMember(context.Context, string, string) (*model.TeamMember, error) {
+	return nil, errRegistryNotFound
 }
 
 // ---------------------------------------------------------------------------

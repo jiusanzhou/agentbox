@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // RunMode represents the execution mode.
 type RunMode string
@@ -27,6 +30,7 @@ const (
 type Run struct {
 	ID        string     `json:"id"`
 	UserID    string     `json:"user_id,omitempty"`
+	TeamID    string     `json:"team_id,omitempty"`
 	Name      string     `json:"name"`
 	Mode      RunMode    `json:"mode"`
 	Status    RunStatus  `json:"status"`
@@ -138,4 +142,44 @@ type WorkflowStepRun struct {
 	Output    string     `json:"output,omitempty"`
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
+}
+
+// Schedule represents a cron-based recurring agent execution.
+type Schedule struct {
+	ID        string     `json:"id"`
+	UserID    string     `json:"user_id"`
+	Name      string     `json:"name"`
+	AgentID   string     `json:"agent_id"`
+	Runtime   string     `json:"runtime"`
+	CronExpr  string     `json:"cron_expr"`
+	Timezone  string     `json:"timezone"`
+	Input     string     `json:"input"`
+	Enabled   bool       `json:"enabled"`
+	LastRunAt *time.Time `json:"last_run_at,omitempty"`
+	NextRunAt *time.Time `json:"next_run_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+// Team represents a collaborative workspace.
+type Team struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	OwnerID   string    `json:"owner_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// TeamMember represents a user's membership in a team.
+type TeamMember struct {
+	TeamID   string    `json:"team_id"`
+	UserID   string    `json:"user_id"`
+	Role     string    `json:"role"` // owner, admin, member
+	JoinedAt time.Time `json:"joined_at"`
+}
+
+// PluginInfo describes a loaded plugin for API responses.
+type PluginInfo struct {
+	Name    string          `json:"name"`
+	Type    string          `json:"type"`
+	Version string          `json:"version"`
+	Config  json.RawMessage `json:"config,omitempty"`
 }

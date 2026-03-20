@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/x"
@@ -98,6 +99,25 @@ type Store interface {
 	GetWorkflowRun(ctx context.Context, id string) (*model.WorkflowRun, error)
 	UpdateWorkflowRun(ctx context.Context, r *model.WorkflowRun) error
 	ListWorkflowRuns(ctx context.Context, workflowID string) ([]*model.WorkflowRun, error)
+
+	// Schedule methods
+	CreateSchedule(ctx context.Context, s *model.Schedule) error
+	GetSchedule(ctx context.Context, id string) (*model.Schedule, error)
+	ListSchedules(ctx context.Context, userID string) ([]*model.Schedule, error)
+	UpdateSchedule(ctx context.Context, s *model.Schedule) error
+	DeleteSchedule(ctx context.Context, id string) error
+	ListDueSchedules(ctx context.Context, now time.Time) ([]*model.Schedule, error)
+
+	// Team methods
+	CreateTeam(ctx context.Context, team *model.Team) error
+	GetTeam(ctx context.Context, id string) (*model.Team, error)
+	ListTeamsByUser(ctx context.Context, userID string) ([]*model.Team, error)
+	UpdateTeam(ctx context.Context, team *model.Team) error
+	DeleteTeam(ctx context.Context, id string) error
+	AddTeamMember(ctx context.Context, member *model.TeamMember) error
+	RemoveTeamMember(ctx context.Context, teamID, userID string) error
+	ListTeamMembers(ctx context.Context, teamID string) ([]*model.TeamMember, error)
+	GetTeamMember(ctx context.Context, teamID, userID string) (*model.TeamMember, error)
 }
 
 // New creates a new Store from a TypedLazyConfig.

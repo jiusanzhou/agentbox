@@ -48,7 +48,7 @@ For power users who need local file access, browser automation, or custom MCP to
 **1.1 User System**
 - [x] User model (id, email, name, avatar, plan, api_key)
 - [x] Auth: email/password
-- [ ] Auth: OAuth (GitHub, Google)
+- [x] Auth: OAuth (GitHub)
 - [x] JWT tokens for API + session cookies for web
 - [x] API key auth for programmatic access
 - [x] Multi-tenant isolation: user can only see own runs/sessions
@@ -66,16 +66,16 @@ For power users who need local file access, browser automation, or custom MCP to
 - [x] Auth middleware (JWT + API key)
 - [x] Rate limiting per user/plan
 - [ ] Request validation (structured)
-- [ ] CORS configuration
-- [ ] WebSocket endpoint for real-time chat
+- [x] CORS configuration
+- [x] WebSocket endpoint for real-time chat
 
 **1.4 Infrastructure**
 - [x] LICENSE (MIT)
 - [x] CI/CD (GitHub Actions: test, build, push image)
 - [x] Server Dockerfile (abox server image)
 - [x] docker-compose.yaml (one-click local dev)
-- [ ] Helm chart for K8s deployment
-- [ ] Goreleaser for multi-platform binaries
+- [x] Helm chart for K8s deployment
+- [x] Goreleaser for multi-platform binaries
 
 ### Phase 2 — Product Polish
 > Make it feel like a real product
@@ -92,23 +92,23 @@ For power users who need local file access, browser automation, or custom MCP to
 - [x] Slack channel
 - [x] 飞书 channel
 - [ ] WeChat channel
-- [ ] IM ↔ user account binding
+- [x] IM ↔ user account binding
 - [ ] Per-IM session management
 
 **2.3 Billing & Quotas**
 - [ ] Usage tracking (compute time, tokens, storage)
 - [ ] Free tier (X runs/month, Y minutes compute)
 - [ ] Pro plan (higher limits, priority scheduling)
-- [ ] Stripe integration
+- [x] Stripe integration
 - [ ] Usage dashboard
 
 **2.4 Reliability**
-- [ ] Tests (unit + integration)
-- [ ] Postgres store (production-grade)
-- [ ] S3 storage (production-grade)
-- [ ] Session persistence (survive server restart)
-- [ ] Health checks + metrics (Prometheus)
-- [ ] Structured logging
+- [x] Tests (unit + integration)
+- [x] Postgres store (production-grade)
+- [x] S3 storage (production-grade)
+- [x] Session persistence (survive server restart)
+- [x] Health checks + metrics (Prometheus)
+- [x] Structured logging
 
 ### Phase 3 — ABox Client
 > Desktop client for power users who need local capabilities
