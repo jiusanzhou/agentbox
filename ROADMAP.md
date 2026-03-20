@@ -91,16 +91,16 @@ For power users who need local file access, browser automation, or custom MCP to
 - [x] Discord channel
 - [x] Slack channel
 - [x] 飞书 channel
-- [ ] WeChat channel
+- [x] WeChat channel
 - [x] IM ↔ user account binding
-- [ ] Per-IM session management
+- [x] Per-IM session management
 
 **2.3 Billing & Quotas**
-- [ ] Usage tracking (compute time, tokens, storage)
+- [x] Usage tracking (compute time, tokens, storage)
 - [ ] Free tier (X runs/month, Y minutes compute)
 - [ ] Pro plan (higher limits, priority scheduling)
 - [x] Stripe integration
-- [ ] Usage dashboard
+- [x] Usage dashboard
 
 **2.4 Reliability**
 - [x] Tests (unit + integration)
@@ -134,11 +134,11 @@ For power users who need local file access, browser automation, or custom MCP to
 ### Phase 4 — Scale & Ecosystem
 > Platform effects and community
 
-- [ ] Plugin system (custom executors, channels, tools)
-- [ ] Workflow chaining (agent A output → agent B input)
-- [ ] Scheduled agents (cron-based daemon mode)
-- [ ] Team workspaces (shared agents, shared sessions)
-- [ ] API for third-party integrations
+- [x] Plugin system (custom executors, channels, tools)
+- [x] Workflow chaining (agent A output → agent B input)
+- [x] Scheduled agents (cron-based daemon mode)
+- [x] Team workspaces (shared agents, shared sessions)
+- [x] API for third-party integrations
 - [ ] Self-hosted enterprise edition
 - [ ] SDK (Python, TypeScript) for programmatic agent creation
 
