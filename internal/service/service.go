@@ -1195,28 +1195,54 @@ func (s *Service) CreateAuthApikey(ctx context.Context) (*APIKeyResponse, error)
 func corsMiddleware(cfg config.CORSConfig) func(http.Handler) http.Handler {
 	origins := cfg.AllowedOrigins
 	if len(origins) == 0 {
-		origins = []string{"*"}
+		origins = []string{"http://localhost:3000"}
 	}
+
+	methods := cfg.AllowedMethods
+	if len(methods) == 0 {
+		methods = []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"}
+	}
+	methodsStr := strings.Join(methods, ", ")
+
+	headers := cfg.AllowedHeaders
+	if len(headers) == 0 {
+		headers = []string{"Content-Type", "Authorization", "x-api-key", "x-base-url", "x-model"}
+	}
+	headersStr := strings.Join(headers, ", ")
+
+	maxAge := cfg.MaxAge
+	if maxAge == 0 {
+		maxAge = 86400
+	}
+	maxAgeStr := fmt.Sprintf("%d", maxAge)
+
+	allowCredentials := cfg.AllowCredentials || len(cfg.AllowedOrigins) == 0 // default true
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-			allowed := origins[0] // default
+			allowed := ""
 			for _, o := range origins {
 				if o == "*" || o == origin {
 					allowed = o
 					break
 				}
 			}
+			if allowed == "" {
+				// Origin not in allowlist; skip CORS headers
+				next.ServeHTTP(w, r)
+				return
+			}
 
 			w.Header().Set("Access-Control-Allow-Origin", allowed)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, x-base-url, x-model")
-			if cfg.AllowCredentials {
+			w.Header().Set("Access-Control-Allow-Methods", methodsStr)
+			w.Header().Set("Access-Control-Allow-Headers", headersStr)
+			if allowCredentials {
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 
 			if r.Method == http.MethodOptions {
+				w.Header().Set("Access-Control-Max-Age", maxAgeStr)
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}

@@ -12,15 +12,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.25"
 
-      - name: Build
-        run: go build ./...
+      - name: Build abox
+        run: go build ./cmd/abox
+
+      - name: Build aboxctl
+        run: go build ./cmd/aboxctl
 
       - name: Test
-        run: go test ./... -v -race
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
 
   docker:
     runs-on: ubuntu-latest

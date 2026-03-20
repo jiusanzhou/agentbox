@@ -96,6 +96,9 @@ type AuthConfig struct {
 type CORSConfig struct {
 	AllowedOrigins   []string `json:"allowed_origins,omitempty" yaml:"allowed_origins"`
 	AllowCredentials bool     `json:"allow_credentials,omitempty" yaml:"allow_credentials"`
+	AllowedMethods   []string `json:"allowed_methods,omitempty" yaml:"allowed_methods"`
+	AllowedHeaders   []string `json:"allowed_headers,omitempty" yaml:"allowed_headers"`
+	MaxAge           int      `json:"max_age,omitempty" yaml:"max_age"`
 }
 
 func NewConfig() *Config {

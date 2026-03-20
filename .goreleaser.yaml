@@ -1,16 +1,17 @@
 version: 2
 
-project_name: abox
+project_name: agentbox
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - main: ./cmd/abox
+  - id: abox
+    main: ./cmd/abox
     binary: abox
     env:
-      - CGO_ENABLED=1
+      - CGO_ENABLED=0
     goos:
       - linux
       - darwin
@@ -23,16 +24,54 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
+      - -X go.zoe.im/x/version.Version={{.Version}}
+      - -X go.zoe.im/x/version.Commit={{.Commit}}
+      - -X go.zoe.im/x/version.Date={{.Date}}
+
+  - id: aboxctl
+    main: ./cmd/aboxctl
+    binary: aboxctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X go.zoe.im/x/version.Version={{.Version}}
+      - -X go.zoe.im/x/version.Commit={{.Commit}}
+      - -X go.zoe.im/x/version.Date={{.Date}}
 
 archives:
-  - format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: abox-archive
+    builds:
+      - abox
+    name_template: "abox_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
         format: zip
     files:
-      - LICENSE*
-      - README*
+      - README.md
+      - LICENSE
+      - config.yaml.example
+
+  - id: aboxctl-archive
+    builds:
+      - aboxctl
+    name_template: "aboxctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
 
 checksum:
   name_template: "checksums.txt"
@@ -44,3 +83,10 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^ci:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  draft: false
+  prerelease: auto

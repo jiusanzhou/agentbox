@@ -1,0 +1,97 @@
+# AgentBox Configuration
+# Copy to config.yaml and adjust as needed.
+
+# Enable debug logging
+debug: false
+
+# Server listen address
+addr: ":8080"
+
+# Authentication
+auth:
+  enabled: true
+  jwt_secret: ""  # Set via ABOX_JWT_SECRET env var in production
+
+  # GitHub OAuth (optional)
+  github_client_id: ""      # ABOX_GITHUB_CLIENT_ID
+  github_client_secret: ""  # ABOX_GITHUB_CLIENT_SECRET
+  github_callback_url: "http://localhost:8080/api/v1/auth/github/callback"  # ABOX_GITHUB_CALLBACK_URL
+
+# Store backend: memory, sqlite, postgres
+store:
+  type: sqlite
+  config:
+    path: "./data/agentbox.db"
+  # Postgres example:
+  # type: postgres
+  # config:
+  #   dsn: "postgres://user:pass@localhost:5432/agentbox?sslmode=disable"
+
+# Artifact storage: local, s3
+storage:
+  type: local
+  config:
+    root: "./data/artifacts"
+
+# Executor backend: docker, local, e2b, tunnel
+executor:
+  type: docker
+  config:
+    image: "agentbox-sandbox:latest"
+
+# Session lifecycle
+session_ttl: "1h"
+cleanup_interval: "5m"
+
+# CORS settings
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+  allow_credentials: true
+  allowed_methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - PATCH
+    - OPTIONS
+  allowed_headers:
+    - Content-Type
+    - Authorization
+    - x-api-key
+    - x-base-url
+    - x-model
+  max_age: 86400
+
+# Rate limiting
+rate_limit:
+  requests_per_minute: 60
+  burst_size: 10
+
+# Tunnel proxy for sandbox containers (optional)
+# tunnel_proxy_addr: ":8081"
+
+# Webhook secret for git push hooks
+# webhook_secret: ""  # ABOX_WEBHOOK_SECRET
+
+# Stripe billing (optional)
+# stripe:
+#   secret_key: ""       # STRIPE_SECRET_KEY
+#   webhook_secret: ""   # STRIPE_WEBHOOK_SECRET
+#   publishable_key: ""  # STRIPE_PUBLISHABLE_KEY
+#   success_url: "http://localhost:8080/billing/success"
+#   cancel_url: "http://localhost:8080/billing/cancel"
+#   free_runs_per_month: 50
+
+# IM channel integrations (optional)
+# channels:
+#   - type: telegram
+#     config:
+#       bot_token: ""
+#   - type: slack
+#     config:
+#       bot_token: ""
+#       app_token: ""
+#   - type: discord
+#     config:
+#       bot_token: ""
