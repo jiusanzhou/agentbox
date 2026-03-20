@@ -147,3 +147,29 @@ For power users who need local file access, browser automation, or custom MCP to
 - Building a new LLM
 - Mobile app (web is mobile-friendly enough)
 - Real-time collaboration (v2+)
+
+## ABox vs NanoBox — Boundary Definition
+
+### ABox (this repo) — Agent Platform Layer
+- **Owns**: User system, auth, billing, IM channels, agent marketplace, workflow engine, scheduling, SDK, web dashboard, CLI
+- **Responsibility**: Agent lifecycle management — from discovery to execution to billing
+- **Executor interface**: Pluggable — Docker, K8s, E2B, Local, **NanoBox**
+- **Does NOT own**: VM/container isolation internals, sandbox kernel, resource enforcement at hypervisor level
+
+### NanoBox (labs.zoe.im/nanobox) — Sandbox Execution Layer
+- **Owns**: Firecracker microVM management, snapshot/restore, pre-warm pool, template system, resource limits (CPU/mem/disk/net/time), node agent
+- **Responsibility**: Provide fast, secure, isolated execution environments via API
+- **API contract**: REST/gRPC — CreateSandbox, Execute, Upload/Download, Destroy
+- **Does NOT own**: User identity, billing, IM routing, agent format/spec, workflow logic
+
+### Integration Point
+NanoBox is an ABox executor plugin. ABox calls NanoBox API through `internal/executor/nanobox/` (to be implemented). Same interface as Docker/K8s/E2B executors.
+
+```
+ABox Executor Interface
+├── docker   → Docker Engine API
+├── k8s      → Kubernetes API
+├── e2b      → E2B Cloud API
+├── local    → OS process
+└── nanobox  → NanoBox REST/gRPC API ← the bridge
+```

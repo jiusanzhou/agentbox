@@ -335,6 +335,12 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("GET /api/v1/billing/runs/{runId}/cost", svc.GetRunCost)
 	mux.HandleFunc("GET /api/v1/billing/quota", svc.GetQuotaStatus)
 
+	// Usage tracking endpoints
+	mux.HandleFunc("GET /api/v1/usage/summary", svc.GetPlatformUsageSummary)
+	mux.HandleFunc("GET /api/v1/usage/history", svc.GetPlatformUsageHistory)
+	mux.HandleFunc("GET /api/v1/usage/quota", svc.GetPlatformUsageQuota)
+	mux.HandleFunc("GET /api/v1/usage/dashboard", svc.GetUsageDashboard)
+
 	// Workflow endpoints
 	mux.HandleFunc("POST /api/v1/workflows", svc.CreateWorkflow)
 	mux.HandleFunc("GET /api/v1/workflows", svc.ListWorkflows)

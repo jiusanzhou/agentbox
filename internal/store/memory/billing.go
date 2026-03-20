@@ -19,6 +19,8 @@ type billingData struct {
 	costBreakdowns  map[string]*model.RunCostBreakdown
 	stripeCustomers map[string]*model.StripeCustomer
 	quotaUsage      map[string]*model.FreeQuotaUsage // key: userID:agentID:period
+	platformUsage   []model.PlatformUsageRecord
+	usageQuotas     map[string]*model.UsageQuota // key: userID
 }
 
 func newBillingData() *billingData {
@@ -28,6 +30,7 @@ func newBillingData() *billingData {
 		costBreakdowns:  make(map[string]*model.RunCostBreakdown),
 		stripeCustomers: make(map[string]*model.StripeCustomer),
 		quotaUsage:      make(map[string]*model.FreeQuotaUsage),
+		usageQuotas:     make(map[string]*model.UsageQuota),
 	}
 }
 
@@ -284,4 +287,153 @@ func (s *memoryStore) IncrementFreeQuotaUsage(_ context.Context, userID, agentID
 	q.Limit = limit
 	q.UpdatedAt = time.Now()
 	return nil
+}
+
+// --- Platform Usage Tracking ---
+
+func (s *memoryStore) RecordPlatformUsage(_ context.Context, rec *model.PlatformUsageRecord) error {
+	s.billing.mu.Lock()
+	defer s.billing.mu.Unlock()
+	if rec.CreatedAt.IsZero() {
+		rec.CreatedAt = time.Now()
+	}
+	s.billing.platformUsage = append(s.billing.platformUsage, *rec)
+	return nil
+}
+
+func (s *memoryStore) GetPlatformUsageSummary(_ context.Context, userID, period string) (*model.PlatformUsageSummary, error) {
+	s.billing.mu.RLock()
+	defer s.billing.mu.RUnlock()
+
+	summary := &model.PlatformUsageSummary{UserID: userID, Period: period}
+
+	for _, rec := range s.billing.platformUsage {
+		if rec.UserID != userID {
+			continue
+		}
+		recPeriod := rec.CreatedAt.Format("2006-01")
+		recDay := rec.CreatedAt.Format("2006-01-02")
+		if period != "" && recPeriod != period && recDay != period {
+			continue
+		}
+		switch rec.Type {
+		case "compute":
+			summary.ComputeSeconds += rec.Amount
+		case "tokens":
+			summary.TokenCount += int64(rec.Amount)
+		case "storage":
+			summary.StorageBytes += int64(rec.Amount)
+		case "api_call":
+			summary.APICalls += int64(rec.Amount)
+		}
+	}
+
+	summary.EstimatedCost = summary.ComputeSeconds*0.10/60 + float64(summary.TokenCount)*3.0/1_000_000
+	return summary, nil
+}
+
+func (s *memoryStore) GetPlatformUsageHistory(_ context.Context, userID string, from, to time.Time, limit int) ([]model.PlatformUsageRecord, error) {
+	s.billing.mu.RLock()
+	defer s.billing.mu.RUnlock()
+
+	var result []model.PlatformUsageRecord
+	for i := len(s.billing.platformUsage) - 1; i >= 0; i-- {
+		rec := s.billing.platformUsage[i]
+		if rec.UserID != userID {
+			continue
+		}
+		if rec.CreatedAt.Before(from) || rec.CreatedAt.After(to) {
+			continue
+		}
+		result = append(result, rec)
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+	}
+	return result, nil
+}
+
+func (s *memoryStore) GetUsageQuota(_ context.Context, userID string) (*model.UsageQuota, error) {
+	s.billing.mu.RLock()
+	defer s.billing.mu.RUnlock()
+	q, ok := s.billing.usageQuotas[userID]
+	if !ok {
+		return model.DefaultFreeQuota(userID), nil
+	}
+	cp := *q
+	return &cp, nil
+}
+
+func (s *memoryStore) SetUsageQuota(_ context.Context, quota *model.UsageQuota) error {
+	s.billing.mu.Lock()
+	defer s.billing.mu.Unlock()
+	cp := *quota
+	s.billing.usageQuotas[quota.UserID] = &cp
+	return nil
+}
+
+func (s *memoryStore) CheckQuota(ctx context.Context, userID, usageType string) (bool, float64, error) {
+	quota, err := s.GetUsageQuota(ctx, userID)
+	if err != nil {
+		return false, 0, err
+	}
+
+	period := time.Now().Format("2006-01")
+	summary, err := s.GetPlatformUsageSummary(ctx, userID, period)
+	if err != nil {
+		return false, 0, err
+	}
+
+	switch usageType {
+	case "compute":
+		remaining := quota.ComputeLimit - summary.ComputeSeconds
+		return remaining > 0, remaining, nil
+	case "tokens":
+		remaining := float64(quota.TokenLimit - summary.TokenCount)
+		return remaining > 0, remaining, nil
+	case "storage":
+		remaining := float64(quota.StorageLimit - summary.StorageBytes)
+		return remaining > 0, remaining, nil
+	case "api_call":
+		remaining := float64(quota.APICallLimit - summary.APICalls)
+		return remaining > 0, remaining, nil
+	default:
+		return true, 0, nil
+	}
+}
+
+func (s *memoryStore) GetDailyUsage(_ context.Context, userID, period string) ([]model.DailyUsage, error) {
+	s.billing.mu.RLock()
+	defer s.billing.mu.RUnlock()
+
+	dayMap := make(map[string]*model.DailyUsage)
+	for _, rec := range s.billing.platformUsage {
+		if rec.UserID != userID {
+			continue
+		}
+		recPeriod := rec.CreatedAt.Format("2006-01")
+		if period != "" && recPeriod != period {
+			continue
+		}
+		day := rec.CreatedAt.Format("2006-01-02")
+		d, ok := dayMap[day]
+		if !ok {
+			d = &model.DailyUsage{Date: day}
+			dayMap[day] = d
+		}
+		switch rec.Type {
+		case "compute":
+			d.ComputeSeconds += rec.Amount
+		case "tokens":
+			d.TokenCount += int64(rec.Amount)
+		case "api_call":
+			d.APICalls += int64(rec.Amount)
+		}
+	}
+
+	var result []model.DailyUsage
+	for _, d := range dayMap {
+		result = append(result, *d)
+	}
+	return result, nil
 }

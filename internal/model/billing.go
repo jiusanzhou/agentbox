@@ -138,6 +138,73 @@ type BillingListOptions struct {
 	Offset   int
 }
 
+// --- Usage Tracking ---
+
+// UsageType classifies what resource is being consumed.
+type UsageType string
+
+const (
+	UsageTypeCompute UsageType = "compute"
+	UsageTypeTokens  UsageType = "tokens"
+	UsageTypeStorage UsageType = "storage"
+	UsageTypeAPICall UsageType = "api_call"
+)
+
+// PlatformUsageRecord tracks compute time, token usage, storage, and API calls per user.
+type PlatformUsageRecord struct {
+	ID          string    `json:"id"`
+	UserID      string    `json:"user_id"`
+	TeamID      string    `json:"team_id,omitempty"`
+	Type        string    `json:"type"`                   // compute, tokens, storage, api_call
+	Amount      float64   `json:"amount"`                 // seconds, count, bytes, count
+	Unit        string    `json:"unit"`                   // seconds, tokens, bytes, calls
+	RunID       string    `json:"run_id,omitempty"`
+	SessionID   string    `json:"session_id,omitempty"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// PlatformUsageSummary aggregates usage for a billing period.
+type PlatformUsageSummary struct {
+	UserID         string  `json:"user_id"`
+	Period         string  `json:"period"`           // 2026-03 or 2026-03-20
+	ComputeSeconds float64 `json:"compute_seconds"`
+	TokenCount     int64   `json:"token_count"`
+	StorageBytes   int64   `json:"storage_bytes"`
+	APICalls       int64   `json:"api_calls"`
+	EstimatedCost  float64 `json:"estimated_cost"`
+}
+
+// UsageQuota defines per-user limits based on plan.
+type UsageQuota struct {
+	UserID       string  `json:"user_id"`
+	Plan         string  `json:"plan"`            // free, pro, team
+	ComputeLimit float64 `json:"compute_limit"`   // seconds/month
+	TokenLimit   int64   `json:"token_limit"`     // tokens/month
+	StorageLimit int64   `json:"storage_limit"`   // bytes
+	APICallLimit int64   `json:"api_call_limit"`  // calls/month
+}
+
+// DailyUsage represents a single day's aggregated usage for dashboard charts.
+type DailyUsage struct {
+	Date           string  `json:"date"` // 2026-03-20
+	ComputeSeconds float64 `json:"compute_seconds"`
+	TokenCount     int64   `json:"token_count"`
+	APICalls       int64   `json:"api_calls"`
+}
+
+// DefaultFreeQuota returns the default quota for the free plan.
+func DefaultFreeQuota(userID string) *UsageQuota {
+	return &UsageQuota{
+		UserID:       userID,
+		Plan:         "free",
+		ComputeLimit: 6000,      // 100 min
+		TokenLimit:   100_000,
+		StorageLimit: 100 << 20, // 100 MB
+		APICallLimit: 1000,
+	}
+}
+
 // --- Run Cost Breakdown ---
 
 // RunCostBreakdown shows the itemised cost for a single run.

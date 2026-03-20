@@ -222,6 +222,27 @@ func (m *mockStore) GetTeamMember(context.Context, string, string) (*model.TeamM
 	return nil, errors.New("not implemented")
 }
 
+// --- Platform usage tracking stubs ---
+func (m *mockStore) RecordPlatformUsage(context.Context, *model.PlatformUsageRecord) error {
+	return nil
+}
+func (m *mockStore) GetPlatformUsageSummary(_ context.Context, _ string, _ string) (*model.PlatformUsageSummary, error) {
+	return &model.PlatformUsageSummary{}, nil
+}
+func (m *mockStore) GetPlatformUsageHistory(context.Context, string, time.Time, time.Time, int) ([]model.PlatformUsageRecord, error) {
+	return nil, nil
+}
+func (m *mockStore) GetUsageQuota(_ context.Context, userID string) (*model.UsageQuota, error) {
+	return model.DefaultFreeQuota(userID), nil
+}
+func (m *mockStore) SetUsageQuota(context.Context, *model.UsageQuota) error { return nil }
+func (m *mockStore) CheckQuota(context.Context, string, string) (bool, float64, error) {
+	return true, 0, nil
+}
+func (m *mockStore) GetDailyUsage(context.Context, string, string) ([]model.DailyUsage, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Mock executor (in-memory, no external deps)
 // ---------------------------------------------------------------------------

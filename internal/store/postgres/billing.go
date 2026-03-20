@@ -97,6 +97,32 @@ CREATE TABLE IF NOT EXISTS free_quota_usage (
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 	PRIMARY KEY (user_id, agent_id, period)
 );
+
+CREATE TABLE IF NOT EXISTS platform_usage_records (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	team_id TEXT NOT NULL DEFAULT '',
+	type TEXT NOT NULL,
+	amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+	unit TEXT NOT NULL DEFAULT '',
+	run_id TEXT NOT NULL DEFAULT '',
+	session_id TEXT NOT NULL DEFAULT '',
+	description TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_platform_usage_user ON platform_usage_records(user_id);
+CREATE INDEX IF NOT EXISTS idx_platform_usage_type ON platform_usage_records(type);
+CREATE INDEX IF NOT EXISTS idx_platform_usage_created ON platform_usage_records(created_at);
+
+CREATE TABLE IF NOT EXISTS usage_quotas (
+	user_id TEXT PRIMARY KEY,
+	plan TEXT NOT NULL DEFAULT 'free',
+	compute_limit DOUBLE PRECISION NOT NULL DEFAULT 6000,
+	token_limit BIGINT NOT NULL DEFAULT 100000,
+	storage_limit BIGINT NOT NULL DEFAULT 104857600,
+	api_call_limit BIGINT NOT NULL DEFAULT 1000
+);
 `
 
 // --- Subscriptions ---
@@ -447,4 +473,157 @@ func (s *pgStore) IncrementFreeQuotaUsage(ctx context.Context, userID, agentID, 
 		  updated_at = NOW()`,
 		userID, agentID, period, limit)
 	return err
+}
+
+// --- Platform Usage Tracking ---
+
+func (s *pgStore) RecordPlatformUsage(ctx context.Context, rec *model.PlatformUsageRecord) error {
+	if rec.CreatedAt.IsZero() {
+		rec.CreatedAt = time.Now()
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO platform_usage_records (id, user_id, team_id, type, amount, unit, run_id, session_id, description, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		rec.ID, rec.UserID, rec.TeamID, rec.Type, rec.Amount, rec.Unit,
+		rec.RunID, rec.SessionID, rec.Description, rec.CreatedAt)
+	return err
+}
+
+func (s *pgStore) GetPlatformUsageSummary(ctx context.Context, userID, period string) (*model.PlatformUsageSummary, error) {
+	summary := &model.PlatformUsageSummary{UserID: userID, Period: period}
+
+	q := `SELECT
+		COALESCE(SUM(CASE WHEN type='compute' THEN amount ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN type='tokens' THEN amount::bigint ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN type='storage' THEN amount::bigint ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN type='api_call' THEN amount::bigint ELSE 0 END), 0)
+	FROM platform_usage_records WHERE user_id = $1`
+	args := []any{userID}
+	argN := 1
+
+	if len(period) == 7 {
+		argN++
+		q += fmt.Sprintf(" AND to_char(created_at, 'YYYY-MM') = $%d", argN)
+		args = append(args, period)
+	} else if len(period) == 10 {
+		argN++
+		q += fmt.Sprintf(" AND to_char(created_at, 'YYYY-MM-DD') = $%d", argN)
+		args = append(args, period)
+	}
+
+	err := s.pool.QueryRow(ctx, q, args...).Scan(
+		&summary.ComputeSeconds, &summary.TokenCount, &summary.StorageBytes, &summary.APICalls)
+	if err != nil {
+		return nil, err
+	}
+
+	summary.EstimatedCost = summary.ComputeSeconds*0.10/60 + float64(summary.TokenCount)*3.0/1_000_000
+	return summary, nil
+}
+
+func (s *pgStore) GetPlatformUsageHistory(ctx context.Context, userID string, from, to time.Time, limit int) ([]model.PlatformUsageRecord, error) {
+	q := `SELECT id, user_id, team_id, type, amount, unit, run_id, session_id, description, created_at
+		  FROM platform_usage_records WHERE user_id = $1 AND created_at >= $2 AND created_at <= $3
+		  ORDER BY created_at DESC`
+	args := []any{userID, from, to}
+	argN := 3
+	if limit > 0 {
+		argN++
+		q += fmt.Sprintf(" LIMIT $%d", argN)
+		args = append(args, limit)
+	}
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []model.PlatformUsageRecord
+	for rows.Next() {
+		var rec model.PlatformUsageRecord
+		if err := rows.Scan(&rec.ID, &rec.UserID, &rec.TeamID, &rec.Type, &rec.Amount, &rec.Unit,
+			&rec.RunID, &rec.SessionID, &rec.Description, &rec.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, rec)
+	}
+	return result, rows.Err()
+}
+
+func (s *pgStore) GetUsageQuota(ctx context.Context, userID string) (*model.UsageQuota, error) {
+	var q model.UsageQuota
+	err := s.pool.QueryRow(ctx,
+		`SELECT user_id, plan, compute_limit, token_limit, storage_limit, api_call_limit FROM usage_quotas WHERE user_id = $1`, userID).
+		Scan(&q.UserID, &q.Plan, &q.ComputeLimit, &q.TokenLimit, &q.StorageLimit, &q.APICallLimit)
+	if err == pgx.ErrNoRows {
+		return model.DefaultFreeQuota(userID), nil
+	}
+	return &q, err
+}
+
+func (s *pgStore) SetUsageQuota(ctx context.Context, quota *model.UsageQuota) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO usage_quotas (user_id, plan, compute_limit, token_limit, storage_limit, api_call_limit)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT(user_id) DO UPDATE SET
+		  plan=EXCLUDED.plan, compute_limit=EXCLUDED.compute_limit, token_limit=EXCLUDED.token_limit,
+		  storage_limit=EXCLUDED.storage_limit, api_call_limit=EXCLUDED.api_call_limit`,
+		quota.UserID, quota.Plan, quota.ComputeLimit, quota.TokenLimit, quota.StorageLimit, quota.APICallLimit)
+	return err
+}
+
+func (s *pgStore) CheckQuota(ctx context.Context, userID, usageType string) (bool, float64, error) {
+	quota, err := s.GetUsageQuota(ctx, userID)
+	if err != nil {
+		return false, 0, err
+	}
+
+	period := time.Now().Format("2006-01")
+	summary, err := s.GetPlatformUsageSummary(ctx, userID, period)
+	if err != nil {
+		return false, 0, err
+	}
+
+	switch usageType {
+	case "compute":
+		remaining := quota.ComputeLimit - summary.ComputeSeconds
+		return remaining > 0, remaining, nil
+	case "tokens":
+		remaining := float64(quota.TokenLimit - summary.TokenCount)
+		return remaining > 0, remaining, nil
+	case "storage":
+		remaining := float64(quota.StorageLimit - summary.StorageBytes)
+		return remaining > 0, remaining, nil
+	case "api_call":
+		remaining := float64(quota.APICallLimit - summary.APICalls)
+		return remaining > 0, remaining, nil
+	default:
+		return true, 0, nil
+	}
+}
+
+func (s *pgStore) GetDailyUsage(ctx context.Context, userID, period string) ([]model.DailyUsage, error) {
+	q := `SELECT to_char(created_at, 'YYYY-MM-DD') as day,
+		COALESCE(SUM(CASE WHEN type='compute' THEN amount ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN type='tokens' THEN amount::bigint ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN type='api_call' THEN amount::bigint ELSE 0 END), 0)
+	FROM platform_usage_records WHERE user_id = $1 AND to_char(created_at, 'YYYY-MM') = $2
+	GROUP BY day ORDER BY day`
+
+	rows, err := s.pool.Query(ctx, q, userID, period)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []model.DailyUsage
+	for rows.Next() {
+		var d model.DailyUsage
+		if err := rows.Scan(&d.Date, &d.ComputeSeconds, &d.TokenCount, &d.APICalls); err != nil {
+			return nil, err
+		}
+		result = append(result, d)
+	}
+	return result, rows.Err()
 }

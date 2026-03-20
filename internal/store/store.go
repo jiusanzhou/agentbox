@@ -80,6 +80,15 @@ type Store interface {
 	GetFreeQuotaUsage(ctx context.Context, userID, agentID, period string) (*model.FreeQuotaUsage, error)
 	IncrementFreeQuotaUsage(ctx context.Context, userID, agentID, period string, limit int64) error
 
+	// Platform usage tracking
+	RecordPlatformUsage(ctx context.Context, record *model.PlatformUsageRecord) error
+	GetPlatformUsageSummary(ctx context.Context, userID, period string) (*model.PlatformUsageSummary, error)
+	GetPlatformUsageHistory(ctx context.Context, userID string, from, to time.Time, limit int) ([]model.PlatformUsageRecord, error)
+	GetUsageQuota(ctx context.Context, userID string) (*model.UsageQuota, error)
+	SetUsageQuota(ctx context.Context, quota *model.UsageQuota) error
+	CheckQuota(ctx context.Context, userID, usageType string) (bool, float64, error)
+	GetDailyUsage(ctx context.Context, userID, period string) ([]model.DailyUsage, error)
+
 	// IM Binding methods
 	CreateIMBinding(ctx context.Context, binding *model.IMBinding) error
 	GetIMBindingByPlatform(ctx context.Context, platform, platformUserID string) (*model.IMBinding, error)

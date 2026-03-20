@@ -256,6 +256,27 @@ func (s *registryMockStore) GetTeamMember(context.Context, string, string) (*mod
 	return nil, errRegistryNotFound
 }
 
+// --- Platform usage tracking stubs ---
+func (s *registryMockStore) RecordPlatformUsage(context.Context, *model.PlatformUsageRecord) error {
+	return nil
+}
+func (s *registryMockStore) GetPlatformUsageSummary(_ context.Context, _ string, _ string) (*model.PlatformUsageSummary, error) {
+	return &model.PlatformUsageSummary{}, nil
+}
+func (s *registryMockStore) GetPlatformUsageHistory(context.Context, string, time.Time, time.Time, int) ([]model.PlatformUsageRecord, error) {
+	return nil, nil
+}
+func (s *registryMockStore) GetUsageQuota(_ context.Context, userID string) (*model.UsageQuota, error) {
+	return model.DefaultFreeQuota(userID), nil
+}
+func (s *registryMockStore) SetUsageQuota(context.Context, *model.UsageQuota) error { return nil }
+func (s *registryMockStore) CheckQuota(context.Context, string, string) (bool, float64, error) {
+	return true, 0, nil
+}
+func (s *registryMockStore) GetDailyUsage(context.Context, string, string) ([]model.DailyUsage, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Test helper: build a minimal Service with just the store and config set.
 // ---------------------------------------------------------------------------

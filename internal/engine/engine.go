@@ -21,6 +21,9 @@ type Engine struct {
 	// Optional tunnel executor for user-local execution via tunnel.
 	tunnelExec executor.Executor
 
+	// Usage tracks platform resource consumption asynchronously.
+	Usage *UsageTracker
+
 	mu     sync.Mutex
 	active map[string]context.CancelFunc
 
@@ -37,6 +40,7 @@ func New(s store.Store, e executor.Executor, logger *slog.Logger) *Engine {
 		store:    s,
 		executor: e,
 		logger:   logger,
+		Usage:    NewUsageTracker(s, logger),
 		active:   make(map[string]context.CancelFunc),
 		sessExec: make(map[string]executor.Executor),
 	}
@@ -97,6 +101,12 @@ func (e *Engine) execute(run *model.Run) {
 
 	end := time.Now()
 	run.EndedAt = &end
+
+	// Track compute time
+	if run.StartedAt != nil {
+		computeSeconds := end.Sub(*run.StartedAt).Seconds()
+		e.Usage.TrackCompute(run.UserID, run.ID, computeSeconds)
+	}
 
 	if err != nil {
 		run.Status = model.RunStatusFailed
@@ -240,6 +250,12 @@ func (e *Engine) SendMessage(ctx context.Context, runID string, message string) 
 		return "", err
 	}
 
+	// Track token usage (rough estimate: len/4)
+	tokenEstimate := int64(len(message)/4 + len(resp)/4)
+	if tokenEstimate > 0 {
+		e.Usage.TrackTokens(run.UserID, runID, runID, tokenEstimate)
+	}
+
 	now := time.Now()
 	run.LastActivityAt = &now
 	_ = e.store.UpdateRun(ctx, run)
@@ -290,6 +306,12 @@ func (e *Engine) SendMessageStream(ctx context.Context, runID string, message st
 	resp, err := e.getSessionExecutor(runID).SendMessageStream(ctx, runID, message, onToken)
 	if err != nil {
 		return "", err
+	}
+
+	// Track token usage (rough estimate: len/4)
+	tokenEstimate := int64(len(message)/4 + len(resp)/4)
+	if tokenEstimate > 0 {
+		e.Usage.TrackTokens(run.UserID, runID, runID, tokenEstimate)
 	}
 
 	now := time.Now()
@@ -431,7 +453,14 @@ func (e *Engine) RecoverSessions(ctx context.Context) error {
 
 // UploadFile copies a file into a running session container.
 func (e *Engine) UploadFile(ctx context.Context, runID string, filename string, data []byte) error {
-	return e.getSessionExecutor(runID).UploadFile(ctx, runID, filename, data)
+	err := e.getSessionExecutor(runID).UploadFile(ctx, runID, filename, data)
+	if err == nil {
+		// Track storage usage — look up user from the run
+		if run, runErr := e.store.GetRun(ctx, runID); runErr == nil {
+			e.Usage.TrackStorage(run.UserID, runID, int64(len(data)))
+		}
+	}
+	return err
 }
 
 // StreamLogs streams container logs line by line.
