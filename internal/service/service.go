@@ -23,6 +23,8 @@ import (
 	"go.zoe.im/agentbox/internal/executor"
 	tunnelexec "go.zoe.im/agentbox/internal/executor/tunnel"
 	"go.zoe.im/agentbox/internal/integration"
+	"go.zoe.im/agentbox/internal/metrics"
+	"go.zoe.im/agentbox/internal/middleware"
 	"go.zoe.im/agentbox/internal/model"
 	"go.zoe.im/agentbox/internal/ratelimit"
 	"go.zoe.im/agentbox/pkg/runtime"
@@ -298,6 +300,9 @@ func New(cfg *config.Config) (*Service, error) {
 	// Billing endpoints
 	mux.HandleFunc("POST /api/v1/billing/subscribe", svc.SubscribeAgent)
 
+	// Prometheus metrics endpoint
+	mux.Handle("GET /metrics", metrics.Handler())
+
 	// Health check endpoint (raw HTTP, overrides talk-generated one)
 	mux.HandleFunc("GET /api/v1/healthz", svc.HandleHealthz)
 	mux.HandleFunc("GET /api/v1/billing/subscriptions", svc.ListSubscriptions)
@@ -311,6 +316,15 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("GET /api/v1/billing/portal", svc.HandleBillingPortal)
 	mux.HandleFunc("GET /api/v1/billing/runs/{runId}/cost", svc.GetRunCost)
 	mux.HandleFunc("GET /api/v1/billing/quota", svc.GetQuotaStatus)
+
+	// Workflow endpoints
+	mux.HandleFunc("POST /api/v1/workflows", svc.CreateWorkflow)
+	mux.HandleFunc("GET /api/v1/workflows", svc.ListWorkflows)
+	mux.HandleFunc("GET /api/v1/workflows/{id}", svc.GetWorkflow)
+	mux.HandleFunc("PUT /api/v1/workflows/{id}", svc.UpdateWorkflow)
+	mux.HandleFunc("DELETE /api/v1/workflows/{id}", svc.DeleteWorkflowHandler)
+	mux.HandleFunc("POST /api/v1/workflows/{id}/run", svc.RunWorkflow)
+	mux.HandleFunc("GET /api/v1/workflows/{id}/runs", svc.ListWorkflowRuns)
 
 	// IM Binding endpoints
 	mux.HandleFunc("POST /api/v1/im/bind", svc.HandleBindCode)
@@ -363,6 +377,10 @@ func (s *Service) Start(ctx context.Context) error {
 	// Start HTTP server with the shared mux
 	s.logger.Info("starting agentbox", "addr", s.cfg.Addr)
 	var handler http.Handler = s.mux
+
+	// Metrics middleware (innermost, records per-request metrics)
+	handler = metricsMiddleware(handler)
+
 	if s.auth != nil {
 		handler = s.auth.Middleware(handler)
 	}
@@ -415,6 +433,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Middleware to extract API provider headers into context
 	handler = apiHeaderMiddleware(handler)
+
+	// Request ID middleware (outermost layer)
+	handler = middleware.RequestID(handler)
 
 	httpSrv := &http.Server{Addr: s.cfg.Addr, Handler: handler}
 
@@ -474,6 +495,35 @@ func (s *Service) authRateLimitMiddleware(next http.Handler) http.Handler {
 }
 
 // securityHeadersMiddleware adds security headers to all responses.
+// statusRecorder wraps http.ResponseWriter to capture the status code.
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.statusCode = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// metricsMiddleware records per-request Prometheus metrics.
+func metricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+
+		next.ServeHTTP(rec, r)
+
+		duration := time.Since(start).Seconds()
+		path := r.URL.Path
+		method := r.Method
+		status := fmt.Sprintf("%d", rec.statusCode)
+
+		metrics.HTTPRequestsTotal.WithLabelValues(method, path, status).Inc()
+		metrics.HTTPRequestDuration.WithLabelValues(method, path).Observe(duration)
+	})
+}
+
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")

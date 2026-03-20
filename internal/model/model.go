@@ -97,3 +97,45 @@ type BindingCode struct {
 	UserID    string    `json:"user_id"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
+
+// Workflow represents a multi-step agent workflow definition.
+type Workflow struct {
+	ID          string         `json:"id"`
+	UserID      string         `json:"user_id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Steps       []WorkflowStep `json:"steps"`
+	Status      string         `json:"status"` // draft, active, paused
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+// WorkflowStep represents a single step in a workflow.
+type WorkflowStep struct {
+	ID        string            `json:"id"`
+	AgentID   string            `json:"agent_id"`
+	Runtime   string            `json:"runtime"`
+	Input     string            `json:"input"`
+	DependsOn []string          `json:"depends_on"`
+	Config    map[string]string `json:"config,omitempty"`
+}
+
+// WorkflowRun represents a single execution of a workflow.
+type WorkflowRun struct {
+	ID         string            `json:"id"`
+	WorkflowID string           `json:"workflow_id"`
+	Status     string            `json:"status"` // pending, running, completed, failed
+	Steps      []WorkflowStepRun `json:"steps"`
+	StartedAt  *time.Time        `json:"started_at,omitempty"`
+	EndedAt    *time.Time        `json:"ended_at,omitempty"`
+}
+
+// WorkflowStepRun represents the execution state of a single workflow step.
+type WorkflowStepRun struct {
+	StepID    string     `json:"step_id"`
+	RunID     string     `json:"run_id"`
+	Status    string     `json:"status"`
+	Output    string     `json:"output,omitempty"`
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
+}

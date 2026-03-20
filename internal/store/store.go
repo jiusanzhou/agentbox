@@ -87,6 +87,17 @@ type Store interface {
 	CreateBindingCode(ctx context.Context, code *model.BindingCode) error
 	GetBindingCode(ctx context.Context, code string) (*model.BindingCode, error)
 	DeleteBindingCode(ctx context.Context, code string) error
+
+	// Workflow methods
+	CreateWorkflow(ctx context.Context, w *model.Workflow) error
+	GetWorkflow(ctx context.Context, id string) (*model.Workflow, error)
+	ListWorkflows(ctx context.Context, userID string) ([]*model.Workflow, error)
+	UpdateWorkflow(ctx context.Context, w *model.Workflow) error
+	DeleteWorkflow(ctx context.Context, id string) error
+	CreateWorkflowRun(ctx context.Context, r *model.WorkflowRun) error
+	GetWorkflowRun(ctx context.Context, id string) (*model.WorkflowRun, error)
+	UpdateWorkflowRun(ctx context.Context, r *model.WorkflowRun) error
+	ListWorkflowRuns(ctx context.Context, workflowID string) ([]*model.WorkflowRun, error)
 }
 
 // New creates a new Store from a TypedLazyConfig.

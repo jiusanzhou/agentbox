@@ -181,6 +181,27 @@ func (m *mockStore) GetBindingCode(context.Context, string) (*model.BindingCode,
 }
 func (m *mockStore) DeleteBindingCode(context.Context, string) error { return nil }
 
+// --- Workflow stubs ---
+func (m *mockStore) CreateWorkflow(context.Context, *model.Workflow) error   { return nil }
+func (m *mockStore) GetWorkflow(context.Context, string) (*model.Workflow, error) {
+	return nil, errNotFound
+}
+func (m *mockStore) ListWorkflows(context.Context, string) ([]*model.Workflow, error) {
+	return nil, nil
+}
+func (m *mockStore) UpdateWorkflow(context.Context, *model.Workflow) error { return nil }
+func (m *mockStore) DeleteWorkflow(context.Context, string) error          { return nil }
+func (m *mockStore) CreateWorkflowRun(context.Context, *model.WorkflowRun) error {
+	return nil
+}
+func (m *mockStore) GetWorkflowRun(context.Context, string) (*model.WorkflowRun, error) {
+	return nil, errNotFound
+}
+func (m *mockStore) UpdateWorkflowRun(context.Context, *model.WorkflowRun) error { return nil }
+func (m *mockStore) ListWorkflowRuns(context.Context, string) ([]*model.WorkflowRun, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

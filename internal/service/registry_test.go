@@ -199,6 +199,29 @@ func (s *registryMockStore) GetBindingCode(context.Context, string) (*model.Bind
 }
 func (s *registryMockStore) DeleteBindingCode(context.Context, string) error { return nil }
 
+// --- Workflow stubs ---
+func (s *registryMockStore) CreateWorkflow(context.Context, *model.Workflow) error   { return nil }
+func (s *registryMockStore) GetWorkflow(context.Context, string) (*model.Workflow, error) {
+	return nil, errRegistryNotFound
+}
+func (s *registryMockStore) ListWorkflows(context.Context, string) ([]*model.Workflow, error) {
+	return nil, nil
+}
+func (s *registryMockStore) UpdateWorkflow(context.Context, *model.Workflow) error { return nil }
+func (s *registryMockStore) DeleteWorkflow(context.Context, string) error          { return nil }
+func (s *registryMockStore) CreateWorkflowRun(context.Context, *model.WorkflowRun) error {
+	return nil
+}
+func (s *registryMockStore) GetWorkflowRun(context.Context, string) (*model.WorkflowRun, error) {
+	return nil, errRegistryNotFound
+}
+func (s *registryMockStore) UpdateWorkflowRun(context.Context, *model.WorkflowRun) error {
+	return nil
+}
+func (s *registryMockStore) ListWorkflowRuns(context.Context, string) ([]*model.WorkflowRun, error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Test helper: build a minimal Service with just the store and config set.
 // ---------------------------------------------------------------------------

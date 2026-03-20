@@ -133,6 +133,34 @@ func migrate(pool *pgxpool.Pool) error {
 		return err
 	}
 
+	// Workflow tables
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS workflows (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			steps JSONB NOT NULL DEFAULT '[]',
+			status TEXT NOT NULL DEFAULT 'draft',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+		CREATE INDEX IF NOT EXISTS idx_workflows_user ON workflows(user_id);
+
+		CREATE TABLE IF NOT EXISTS workflow_runs (
+			id TEXT PRIMARY KEY,
+			workflow_id TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			steps JSONB NOT NULL DEFAULT '[]',
+			started_at TIMESTAMPTZ,
+			ended_at TIMESTAMPTZ
+		);
+		CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+	`)
+	if err != nil {
+		return err
+	}
+
 	// IM Binding tables
 	_, err = pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS im_bindings (

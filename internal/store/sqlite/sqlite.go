@@ -161,6 +161,34 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 
+	// Workflow tables
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS workflows (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			steps TEXT NOT NULL DEFAULT '[]',
+			status TEXT NOT NULL DEFAULT 'draft',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_workflows_user ON workflows(user_id);
+
+		CREATE TABLE IF NOT EXISTS workflow_runs (
+			id TEXT PRIMARY KEY,
+			workflow_id TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			steps TEXT NOT NULL DEFAULT '[]',
+			started_at DATETIME,
+			ended_at DATETIME
+		);
+		CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+	`)
+	if err != nil {
+		return err
+	}
+
 	// IM Binding tables
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS im_bindings (
