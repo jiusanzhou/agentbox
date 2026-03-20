@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -272,38 +271,58 @@ func runAgentRun(cmd *cli.Command, args ...string) {
 
 	fmt.Printf("Starting %s (%s) with runtime=%s...\n", m.Name, m.ID, runtime)
 
-	// Create run via API
-	client, err := newClient()
+	// Create run via REST API directly (bypass talk client for reliable routing)
+	apiBase := serverAddr
+	if apiBase == "" {
+		apiBase = "http://localhost:8080"
+	}
+	if addr := os.Getenv("AGENTBOX_SERVER"); addr != "" {
+		apiBase = addr
+	}
+	apiBase = strings.TrimSuffix(apiBase, "/")
+	// Ensure we hit /api/v1/run
+	runURL := apiBase + "/api/v1/run"
+	if strings.HasSuffix(apiBase, "/api/v1") {
+		runURL = apiBase + "/run"
+	}
+
+	reqBody := map[string]any{
+		"name":       m.Name,
+		"runtime":    runtime,
+		"agent_file": agentFileContent,
+		"config":     map[string]any{"timeout": 3600},
+	}
+	if agentRunExecutor != "" {
+		reqBody["executor"] = agentRunExecutor
+	}
+
+	reqData, _ := json.Marshal(reqBody)
+	resp, err := http.Post(runURL, "application/json", strings.NewReader(string(reqData)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error connecting to server: %v\n", err)
 		fmt.Fprintln(os.Stderr, "Is the ABox server running? (abox --config config.yaml)")
 		os.Exit(1)
 	}
-	defer client.Close()
+	defer resp.Body.Close()
 
-	req := map[string]any{
-		"name":       m.Name,
-		"runtime":    runtime,
-		"agent_file": agentFileContent,
-		"mode":       "session",
-	}
-	if agentRunExecutor != "" {
-		req["executor"] = agentRunExecutor
-	}
-	if agentRunMessage != "" {
-		req["message"] = agentRunMessage
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		fmt.Fprintf(os.Stderr, "Error creating run (HTTP %d): %s\n", resp.StatusCode, string(respBody))
+		os.Exit(1)
 	}
 
 	var run model.Run
-	if err := client.Call(context.Background(), "CreateRun", req, &run); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating run: %v\n", err)
+	if err := json.Unmarshal(respBody, &run); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)
 		os.Exit(1)
 	}
 
 	fmt.Printf("\n✅ Agent started!\n")
-	fmt.Printf("  Run ID: %s\n", run.ID)
-	fmt.Printf("  Name:   %s\n", m.Name)
-	fmt.Printf("  Status: %s\n", run.Status)
+	fmt.Printf("  Run ID:  %s\n", run.ID)
+	fmt.Printf("  Name:    %s\n", m.Name)
+	fmt.Printf("  Status:  %s\n", run.Status)
+	fmt.Printf("  Runtime: %s\n", runtime)
 	if agentRunMessage != "" {
 		fmt.Printf("  Message: %s\n", agentRunMessage)
 	}

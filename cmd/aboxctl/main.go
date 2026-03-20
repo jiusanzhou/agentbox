@@ -17,7 +17,7 @@ import (
 	_ "go.zoe.im/x/talk/transport/http/std"
 )
 
-var serverAddr = "http://localhost:8080"
+var serverAddr = "http://localhost:8080/api/v1"
 
 func newClient() (*talk.Client, error) {
 	if addr := os.Getenv("AGENTBOX_SERVER"); addr != "" {
