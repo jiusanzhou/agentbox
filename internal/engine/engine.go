@@ -371,11 +371,18 @@ func (e *Engine) StopAll(ctx context.Context) {
 }
 
 // RecoverSessions scans for running containers/pods and reconciles with the store.
+// Sessions in the store that were "running" but have no backing process are marked "interrupted".
 func (e *Engine) RecoverSessions(ctx context.Context) error {
 	ids, err := e.executor.RecoverSessions(ctx)
 	if err != nil {
 		e.logger.Warn("failed to recover sessions", "err", err)
 		return err
+	}
+
+	// Build a set of executor-reported running session IDs.
+	alive := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		alive[id] = true
 	}
 
 	recovered := 0
@@ -391,6 +398,31 @@ func (e *Engine) RecoverSessions(ctx context.Context) error {
 		}
 		recovered++
 		e.logger.Info("recovered session", "id", id)
+	}
+
+	// Mark sessions that were "running" in the store but have no backing process.
+	runs, err := e.store.ListRuns(ctx, 1000, 0)
+	if err != nil {
+		e.logger.Warn("failed to list runs for interrupted check", "err", err)
+	} else {
+		interrupted := 0
+		now := time.Now()
+		for _, run := range runs {
+			if run.Status != model.RunStatusRunning {
+				continue
+			}
+			if alive[run.ID] {
+				continue
+			}
+			run.Status = model.RunStatusInterrupted
+			run.EndedAt = &now
+			_ = e.store.UpdateRun(ctx, run)
+			interrupted++
+			e.logger.Info("marked session as interrupted", "id", run.ID)
+		}
+		if interrupted > 0 {
+			e.logger.Info("interrupted orphaned sessions", "count", interrupted)
+		}
 	}
 
 	e.logger.Info("session recovery complete", "recovered", recovered)

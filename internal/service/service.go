@@ -39,6 +39,7 @@ import (
 	_ "go.zoe.im/agentbox/internal/executor/tunnel"
 	_ "go.zoe.im/agentbox/internal/storage/local"
 	_ "go.zoe.im/agentbox/internal/store/memory"
+	_ "go.zoe.im/agentbox/internal/store/postgres"
 	_ "go.zoe.im/agentbox/internal/store/sqlite"
 
 	// register channel implementations
@@ -104,6 +105,7 @@ type Service struct {
 	installs     *installManager
 	logger       *slog.Logger
 	stripe       *billing.StripeClient
+	startedAt    time.Time
 }
 
 func New(cfg *config.Config) (*Service, error) {
@@ -292,6 +294,9 @@ func New(cfg *config.Config) (*Service, error) {
 
 	// Billing endpoints
 	mux.HandleFunc("POST /api/v1/billing/subscribe", svc.SubscribeAgent)
+
+	// Health check endpoint (raw HTTP, overrides talk-generated one)
+	mux.HandleFunc("GET /api/v1/healthz", svc.HandleHealthz)
 	mux.HandleFunc("GET /api/v1/billing/subscriptions", svc.ListSubscriptions)
 	mux.HandleFunc("POST /api/v1/billing/subscriptions/{id}/cancel", svc.CancelSubscription)
 	mux.HandleFunc("POST /api/v1/billing/usage", svc.RecordUsage)
@@ -313,6 +318,8 @@ func New(cfg *config.Config) (*Service, error) {
 
 // Start runs the server and channel router with graceful shutdown.
 func (s *Service) Start(ctx context.Context) error {
+	s.startedAt = time.Now()
+
 	// Recover existing sessions from running containers/pods
 	if err := s.engine.RecoverSessions(ctx); err != nil {
 		s.logger.Warn("session recovery failed", "err", err)
@@ -668,9 +675,42 @@ func (s *Service) DeleteSession(ctx context.Context, id string) error {
 	return s.engine.StopSession(ctx, id)
 }
 
-// @talk path=/healthz method=GET
+// GetHealth is skipped by talk — see HandleHealthz registered as raw HTTP handler.
 func (s *Service) GetHealth(ctx context.Context) (map[string]string, error) {
 	return map[string]string{"status": "ok"}, nil
+}
+
+// HandleHealthz returns detailed health status.
+func (s *Service) HandleHealthz(w http.ResponseWriter, r *http.Request) {
+	// Count active sessions
+	all, _ := s.store.ListRuns(r.Context(), 1000, 0)
+	active := 0
+	for _, run := range all {
+		if run.Mode == model.RunModeSession && run.Status == model.RunStatusRunning {
+			active++
+		}
+	}
+
+	storeType := s.cfg.Store.Type
+	if storeType == "" {
+		storeType = "sqlite"
+	}
+	executorType := s.cfg.Executor.Type
+	if executorType == "" {
+		executorType = "docker"
+	}
+
+	resp := map[string]any{
+		"status":          "ok",
+		"version":         "dev",
+		"uptime":          time.Since(s.startedAt).Round(time.Second).String(),
+		"store":           storeType,
+		"executor":        executorType,
+		"sessions_active": active,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 // TalkAnnotations controls endpoint extraction.
@@ -698,6 +738,7 @@ func (s *Service) TalkAnnotations() map[string]string {
 		"CreateRegistryAgent": "@talk skip",
 		"UpdateRegistryAgent": "@talk skip",
 		"HireRegistryAgent":   "@talk skip",
+		"GetHealth":           "@talk skip",
 	}
 }
 

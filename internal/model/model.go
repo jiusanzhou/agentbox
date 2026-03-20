@@ -15,11 +15,12 @@ const (
 type RunStatus string
 
 const (
-	RunStatusPending   RunStatus = "pending"
-	RunStatusRunning   RunStatus = "running"
-	RunStatusCompleted RunStatus = "completed"
-	RunStatusFailed    RunStatus = "failed"
-	RunStatusCancelled RunStatus = "cancelled"
+	RunStatusPending     RunStatus = "pending"
+	RunStatusRunning     RunStatus = "running"
+	RunStatusCompleted   RunStatus = "completed"
+	RunStatusFailed      RunStatus = "failed"
+	RunStatusCancelled   RunStatus = "cancelled"
+	RunStatusInterrupted RunStatus = "interrupted"
 )
 
 // Run represents a single agent workflow execution.
