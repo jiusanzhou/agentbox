@@ -17,12 +17,14 @@ func init() {
 }
 
 type memoryStore struct {
-	mu           sync.RWMutex
-	runs         map[string]*model.Run
-	users        map[string]*model.User
-	integrations map[string]*model.Integration
-	agentDNAs    map[string]*model.AgentDNA
-	billing      *billingData
+	mu            sync.RWMutex
+	runs          map[string]*model.Run
+	users         map[string]*model.User
+	integrations  map[string]*model.Integration
+	agentDNAs     map[string]*model.AgentDNA
+	billing       *billingData
+	imBindings    map[string]*model.IMBinding
+	bindingCodes  map[string]*model.BindingCode
 }
 
 func New() store.Store {
@@ -32,6 +34,8 @@ func New() store.Store {
 		integrations: make(map[string]*model.Integration),
 		agentDNAs:    make(map[string]*model.AgentDNA),
 		billing:      newBillingData(),
+		imBindings:   make(map[string]*model.IMBinding),
+		bindingCodes: make(map[string]*model.BindingCode),
 	}
 }
 

@@ -139,6 +139,21 @@ func (s *pgStore) GetActiveSubscription(ctx context.Context, userID, agentID str
 	return &sub, err
 }
 
+func (s *pgStore) GetSubscriptionByStripeSubID(ctx context.Context, stripeSubID string) (*model.Subscription, error) {
+	var sub model.Subscription
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, user_id, agent_id, pricing_model, status, stripe_sub_id, stripe_price_id, trial_ends_at, current_period_start, current_period_end, canceled_at, created_at, updated_at
+		 FROM subscriptions WHERE stripe_sub_id = $1 LIMIT 1`,
+		stripeSubID).
+		Scan(&sub.ID, &sub.UserID, &sub.AgentID, &sub.PricingModel, &sub.Status,
+			&sub.StripeSubID, &sub.StripePriceID, &sub.TrialEndsAt,
+			&sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.CanceledAt, &sub.CreatedAt, &sub.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("no subscription with stripe_sub_id %s", stripeSubID)
+	}
+	return &sub, err
+}
+
 func (s *pgStore) UpdateSubscription(ctx context.Context, sub *model.Subscription) error {
 	_, err := s.pool.Exec(ctx,
 		`UPDATE subscriptions SET status=$1, stripe_sub_id=$2, current_period_start=$3, current_period_end=$4, canceled_at=$5, updated_at=$6 WHERE id=$7`,

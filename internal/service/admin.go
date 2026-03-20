@@ -150,7 +150,7 @@ func (s *Service) ReloadChannels(ctx context.Context) error {
 		return nil
 	}
 
-	router := channel.NewRouter(s.engine, s.logger)
+	router := channel.NewRouter(s.engine, s.store, s.logger)
 	for _, chCfg := range s.cfg.Channels {
 		ch, err := channel.New(chCfg, s.mux)
 		if err != nil {

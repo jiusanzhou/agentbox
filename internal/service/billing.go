@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/stripe/stripe-go/v82"
+	portalsession "github.com/stripe/stripe-go/v82/billingportal/session"
+
 	"go.zoe.im/agentbox/internal/auth"
 	billingpkg "go.zoe.im/agentbox/internal/billing"
 	"go.zoe.im/agentbox/internal/model"
@@ -395,6 +398,19 @@ func (s *Service) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	switch event.Type {
+	case "checkout.session.completed":
+		if event.UserID == "" || event.AgentID == "" {
+			break
+		}
+		// Activate an existing subscription (e.g. from trial) or mark it as paid.
+		sub, _ := s.store.GetActiveSubscription(ctx, event.UserID, event.AgentID)
+		if sub == nil {
+			break
+		}
+		sub.Status = model.SubscriptionActive
+		sub.UpdatedAt = time.Now()
+		_ = s.store.UpdateSubscription(ctx, sub)
+
 	case "customer.subscription.created", "customer.subscription.updated":
 		if event.UserID == "" {
 			// Look up user by stripe customer ID (best effort)
@@ -423,9 +439,79 @@ func (s *Service) HandleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		sub.CanceledAt = &now
 		sub.UpdatedAt = now
 		_ = s.store.UpdateSubscription(ctx, sub)
+
+	case "invoice.payment_succeeded":
+		if event.StripeSubID == "" {
+			break
+		}
+		sub, _ := s.store.GetSubscriptionByStripeSubID(ctx, event.StripeSubID)
+		if sub == nil {
+			break
+		}
+		now := time.Now()
+		sub.Status = model.SubscriptionActive
+		sub.CurrentPeriodStart = now
+		sub.CurrentPeriodEnd = now.AddDate(0, 1, 0)
+		sub.UpdatedAt = now
+		_ = s.store.UpdateSubscription(ctx, sub)
+
+	case "invoice.payment_failed":
+		if event.StripeSubID == "" {
+			break
+		}
+		sub, _ := s.store.GetSubscriptionByStripeSubID(ctx, event.StripeSubID)
+		if sub == nil {
+			break
+		}
+		sub.Status = model.SubscriptionPastDue
+		sub.UpdatedAt = time.Now()
+		_ = s.store.UpdateSubscription(ctx, sub)
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// --- Billing Portal ---
+
+// HandleBillingPortal handles GET /api/v1/billing/portal
+// Creates a Stripe billing portal session for the authenticated user.
+func (s *Service) HandleBillingPortal(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	if s.stripe == nil {
+		http.Error(w, `{"error":"stripe not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	sc, err := s.store.GetStripeCustomer(r.Context(), user.ID)
+	if err != nil {
+		http.Error(w, `{"error":"no billing account found"}`, http.StatusNotFound)
+		return
+	}
+
+	returnURL := s.cfg.Stripe.SuccessURL
+	if returnURL == "" {
+		returnURL = s.cfg.Stripe.CancelURL
+	}
+
+	params := &stripe.BillingPortalSessionParams{
+		Customer:  stripe.String(sc.StripeCustomerID),
+		ReturnURL: stripe.String(returnURL),
+	}
+	sess, err := portalsession.New(params)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"url": sess.URL,
+	})
 }
 
 // --- Run Cost Breakdown ---

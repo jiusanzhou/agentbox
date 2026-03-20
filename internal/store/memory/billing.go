@@ -65,6 +65,17 @@ func (s *memoryStore) GetActiveSubscription(_ context.Context, userID, agentID s
 	return nil, fmt.Errorf("no active subscription for user %s agent %s", userID, agentID)
 }
 
+func (s *memoryStore) GetSubscriptionByStripeSubID(_ context.Context, stripeSubID string) (*model.Subscription, error) {
+	s.billing.mu.RLock()
+	defer s.billing.mu.RUnlock()
+	for _, sub := range s.billing.subscriptions {
+		if sub.StripeSubID == stripeSubID {
+			return sub, nil
+		}
+	}
+	return nil, fmt.Errorf("no subscription with stripe_sub_id %s", stripeSubID)
+}
+
 func (s *memoryStore) UpdateSubscription(_ context.Context, sub *model.Subscription) error {
 	s.billing.mu.Lock()
 	defer s.billing.mu.Unlock()

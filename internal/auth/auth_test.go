@@ -126,6 +126,9 @@ func (m *mockStore) GetSubscription(context.Context, string) (*model.Subscriptio
 func (m *mockStore) GetActiveSubscription(context.Context, string, string) (*model.Subscription, error) {
 	return nil, errNotFound
 }
+func (m *mockStore) GetSubscriptionByStripeSubID(context.Context, string) (*model.Subscription, error) {
+	return nil, errNotFound
+}
 func (m *mockStore) UpdateSubscription(context.Context, *model.Subscription) error { return nil }
 func (m *mockStore) ListSubscriptions(context.Context, string) ([]*model.Subscription, error) {
 	return nil, nil
@@ -160,6 +163,23 @@ func (m *mockStore) GetFreeQuotaUsage(context.Context, string, string, string) (
 func (m *mockStore) IncrementFreeQuotaUsage(context.Context, string, string, string, int64) error {
 	return nil
 }
+func (m *mockStore) CreateIMBinding(context.Context, *model.IMBinding) error {
+	return nil
+}
+func (m *mockStore) GetIMBindingByPlatform(context.Context, string, string) (*model.IMBinding, error) {
+	return nil, errNotFound
+}
+func (m *mockStore) ListIMBindingsByUser(context.Context, string) ([]*model.IMBinding, error) {
+	return nil, nil
+}
+func (m *mockStore) DeleteIMBinding(context.Context, string) error { return nil }
+func (m *mockStore) CreateBindingCode(context.Context, *model.BindingCode) error {
+	return nil
+}
+func (m *mockStore) GetBindingCode(context.Context, string) (*model.BindingCode, error) {
+	return nil, errNotFound
+}
+func (m *mockStore) DeleteBindingCode(context.Context, string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // Tests

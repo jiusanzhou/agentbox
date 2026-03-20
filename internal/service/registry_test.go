@@ -138,6 +138,9 @@ func (s *registryMockStore) GetSubscription(context.Context, string) (*model.Sub
 func (s *registryMockStore) GetActiveSubscription(context.Context, string, string) (*model.Subscription, error) {
 	return nil, errRegistryNotFound
 }
+func (s *registryMockStore) GetSubscriptionByStripeSubID(context.Context, string) (*model.Subscription, error) {
+	return nil, errRegistryNotFound
+}
 func (s *registryMockStore) UpdateSubscription(context.Context, *model.Subscription) error {
 	return nil
 }
@@ -178,6 +181,23 @@ func (s *registryMockStore) GetFreeQuotaUsage(context.Context, string, string, s
 func (s *registryMockStore) IncrementFreeQuotaUsage(context.Context, string, string, string, int64) error {
 	return nil
 }
+func (s *registryMockStore) CreateIMBinding(context.Context, *model.IMBinding) error {
+	return nil
+}
+func (s *registryMockStore) GetIMBindingByPlatform(context.Context, string, string) (*model.IMBinding, error) {
+	return nil, errRegistryNotFound
+}
+func (s *registryMockStore) ListIMBindingsByUser(context.Context, string) ([]*model.IMBinding, error) {
+	return nil, nil
+}
+func (s *registryMockStore) DeleteIMBinding(context.Context, string) error { return nil }
+func (s *registryMockStore) CreateBindingCode(context.Context, *model.BindingCode) error {
+	return nil
+}
+func (s *registryMockStore) GetBindingCode(context.Context, string) (*model.BindingCode, error) {
+	return nil, errRegistryNotFound
+}
+func (s *registryMockStore) DeleteBindingCode(context.Context, string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // Test helper: build a minimal Service with just the store and config set.

@@ -12,6 +12,7 @@ import (
 
 	"go.zoe.im/agentbox/internal/engine"
 	"go.zoe.im/agentbox/internal/model"
+	"go.zoe.im/agentbox/internal/store"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 // Router routes IM messages to engine sessions.
 type Router struct {
 	engine      *engine.Engine
+	store       store.Store
 	channels    []Channel
 	sessions    map[string]string // chatID -> sessionID
 	mu          sync.RWMutex
@@ -30,12 +32,13 @@ type Router struct {
 }
 
 // NewRouter creates a Router.
-func NewRouter(eng *engine.Engine, logger *slog.Logger) *Router {
+func NewRouter(eng *engine.Engine, st store.Store, logger *slog.Logger) *Router {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Router{
 		engine:      eng,
+		store:       st,
 		channels:    nil,
 		sessions:    make(map[string]string),
 		logger:      logger,
@@ -110,6 +113,9 @@ func (r *Router) handle(ctx context.Context, msg *Message) error {
 	case strings.HasPrefix(text, "/agent "):
 		prompt := strings.TrimPrefix(text, "/agent ")
 		return r.handleAgent(ctx, ch, msg, prompt)
+	case strings.HasPrefix(text, "/bind "):
+		code := strings.TrimPrefix(text, "/bind ")
+		return r.handleBind(ctx, ch, msg, strings.TrimSpace(code))
 	}
 
 	// Regular message — route to session.
@@ -440,4 +446,42 @@ func shortID() string {
 	b := make([]byte, 4)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func (r *Router) handleBind(ctx context.Context, ch Channel, msg *Message, code string) error {
+	if code == "" {
+		return r.send(ctx, ch, msg.ChatID, "Usage: /bind <CODE>", msg.ID)
+	}
+
+	// Look up the binding code.
+	bc, err := r.store.GetBindingCode(ctx, code)
+	if err != nil {
+		return r.send(ctx, ch, msg.ChatID, "Invalid or expired binding code.", msg.ID)
+	}
+
+	// Determine the platform from the channel name.
+	platform := "unknown"
+	if msg.Extra != nil {
+		if chName, ok := msg.Extra["channel"]; ok {
+			platform = chName
+		}
+	}
+
+	// Create the IM binding.
+	binding := &model.IMBinding{
+		ID:               shortID() + shortID(),
+		UserID:           bc.UserID,
+		Platform:         platform,
+		PlatformUserID:   msg.ChatID,
+		PlatformUsername: msg.ChatID,
+		CreatedAt:        time.Now(),
+	}
+	if err := r.store.CreateIMBinding(ctx, binding); err != nil {
+		return r.send(ctx, ch, msg.ChatID, "Failed to create binding: "+err.Error(), msg.ID)
+	}
+
+	// Delete the used code.
+	_ = r.store.DeleteBindingCode(ctx, code)
+
+	return r.send(ctx, ch, msg.ChatID, "Account linked successfully!", msg.ID)
 }

@@ -89,7 +89,7 @@ func registerAndGetToken(t *testing.T, ts *httptest.Server, email string) string
 
 func TestE2E_HealthCheck(t *testing.T) {
 	ts := setupE2E(t)
-	status, body := doJSON(t, "GET", ts.URL+"/api/v1/health", "", "")
+	status, body := doJSON(t, "GET", ts.URL+"/api/v1/healthz", "", "")
 	assert(t, status == 200, "health: "+string(body))
 	var m map[string]string
 	json.Unmarshal(body, &m)

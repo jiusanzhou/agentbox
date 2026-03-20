@@ -80,3 +80,20 @@ type Agent struct {
 	Guidelines  []string `json:"guidelines,omitempty"`
 	Skills      []string `json:"skills,omitempty"`
 }
+
+// IMBinding links a platform IM user to a registered user.
+type IMBinding struct {
+	ID               string    `json:"id"`
+	UserID           string    `json:"user_id"`
+	Platform         string    `json:"platform"`
+	PlatformUserID   string    `json:"platform_user_id"`
+	PlatformUsername string    `json:"platform_username"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// BindingCode is a short-lived code for verifying IM bindings.
+type BindingCode struct {
+	Code      string    `json:"code"`
+	UserID    string    `json:"user_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}

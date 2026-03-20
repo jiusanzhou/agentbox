@@ -209,6 +209,9 @@ func New(cfg *config.Config) (*Service, error) {
 		)
 	}
 
+	// Register WebSocket endpoint for real-time chat
+	mux.HandleFunc("GET /api/v1/ws/{session_id}", svc.HandleWebSocket)
+
 	// Register SSE streaming endpoint (raw HTTP, not via talk)
 	mux.HandleFunc("POST /api/v1/stream", svc.StreamSessionMessage)
 
@@ -220,7 +223,7 @@ func New(cfg *config.Config) (*Service, error) {
 
 	// Initialize channel router if channels are configured.
 	if len(cfg.Channels) > 0 {
-		router := channel.NewRouter(eng, logger)
+		router := channel.NewRouter(eng, s, logger)
 		for _, chCfg := range cfg.Channels {
 			ch, err := channel.New(chCfg, mux)
 			if err != nil {
@@ -305,8 +308,15 @@ func New(cfg *config.Config) (*Service, error) {
 	mux.HandleFunc("GET /api/v1/billing/revenue", svc.GetAuthorRevenue)
 	mux.HandleFunc("POST /api/v1/billing/checkout", svc.CreateCheckoutSession)
 	mux.HandleFunc("POST /api/v1/billing/stripe/webhook", svc.HandleStripeWebhook)
+	mux.HandleFunc("GET /api/v1/billing/portal", svc.HandleBillingPortal)
 	mux.HandleFunc("GET /api/v1/billing/runs/{runId}/cost", svc.GetRunCost)
 	mux.HandleFunc("GET /api/v1/billing/quota", svc.GetQuotaStatus)
+
+	// IM Binding endpoints
+	mux.HandleFunc("POST /api/v1/im/bind", svc.HandleBindCode)
+	mux.HandleFunc("POST /api/v1/im/verify", svc.HandleVerifyBinding)
+	mux.HandleFunc("GET /api/v1/im/bindings", svc.ListIMBindings)
+	mux.HandleFunc("DELETE /api/v1/im/bindings/{id}", svc.DeleteIMBinding)
 
 	// Register endpoints via talk reflection
 	if err := server.Register(svc); err != nil {

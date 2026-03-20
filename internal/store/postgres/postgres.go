@@ -129,6 +129,29 @@ func migrate(pool *pgxpool.Pool) error {
 
 	// Billing tables
 	_, err = pool.Exec(ctx, billingMigration)
+	if err != nil {
+		return err
+	}
+
+	// IM Binding tables
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS im_bindings (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			platform TEXT NOT NULL,
+			platform_user_id TEXT NOT NULL,
+			platform_username TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_im_bindings_platform ON im_bindings(platform, platform_user_id);
+		CREATE INDEX IF NOT EXISTS idx_im_bindings_user ON im_bindings(user_id);
+
+		CREATE TABLE IF NOT EXISTS binding_codes (
+			code TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL
+		);
+	`)
 	return err
 }
 

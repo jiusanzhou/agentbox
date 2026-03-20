@@ -1,7 +1,23 @@
 version: "3.9"
 
 services:
-  abox:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agentbox
+      POSTGRES_USER: abox
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-abox_dev_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U abox -d agentbox"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  agentbox:
     build: .
     ports:
       - "8080:8080"
@@ -10,7 +26,14 @@ services:
       - abox-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      - JWT_SECRET=${JWT_SECRET:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-abox_dev_password}
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   web:
@@ -18,9 +41,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - ABOX_API_URL=http://abox:8080
+      - ABOX_API_URL=http://agentbox:8080
     depends_on:
-      - abox
+      - agentbox
 
 volumes:
+  pgdata:
   abox-data:

@@ -143,6 +143,21 @@ func (s *sqliteStore) GetActiveSubscription(ctx context.Context, userID, agentID
 	return &sub, err
 }
 
+func (s *sqliteStore) GetSubscriptionByStripeSubID(ctx context.Context, stripeSubID string) (*model.Subscription, error) {
+	var sub model.Subscription
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, user_id, agent_id, pricing_model, status, stripe_sub_id, stripe_price_id, trial_ends_at, current_period_start, current_period_end, canceled_at, created_at, updated_at
+		 FROM subscriptions WHERE stripe_sub_id = ? LIMIT 1`,
+		stripeSubID).
+		Scan(&sub.ID, &sub.UserID, &sub.AgentID, &sub.PricingModel, &sub.Status,
+			&sub.StripeSubID, &sub.StripePriceID, &sub.TrialEndsAt,
+			&sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.CanceledAt, &sub.CreatedAt, &sub.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("no subscription with stripe_sub_id %s", stripeSubID)
+	}
+	return &sub, err
+}
+
 func (s *sqliteStore) UpdateSubscription(ctx context.Context, sub *model.Subscription) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE subscriptions SET status=?, stripe_sub_id=?, current_period_start=?, current_period_end=?, canceled_at=?, updated_at=? WHERE id=?`,

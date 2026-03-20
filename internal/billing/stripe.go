@@ -165,6 +165,20 @@ func (c *StripeClient) ParseWebhook(r *http.Request) (*WebhookEvent, error) {
 		if inv.Customer != nil {
 			we.StripeCustomerID = inv.Customer.ID
 		}
+
+	case "invoice.payment_failed":
+		var inv stripe.Invoice
+		if err := json.Unmarshal(event.Data.Raw, &inv); err != nil {
+			return nil, err
+		}
+		if inv.Parent != nil &&
+			inv.Parent.SubscriptionDetails != nil &&
+			inv.Parent.SubscriptionDetails.Subscription != nil {
+			we.StripeSubID = inv.Parent.SubscriptionDetails.Subscription.ID
+		}
+		if inv.Customer != nil {
+			we.StripeCustomerID = inv.Customer.ID
+		}
 	}
 
 	return we, nil

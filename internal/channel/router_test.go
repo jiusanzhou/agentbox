@@ -170,7 +170,7 @@ func setupRouter(t *testing.T) (*Router, *mockChannel, *mockExecutor) {
 	exec := newMockExecutor()
 	eng := engine.New(st, exec, nil)
 	ch := &mockChannel{name: "test"}
-	r := NewRouter(eng, nil)
+	r := NewRouter(eng, st, nil)
 	r.Add(ch)
 	return r, ch, exec
 }
@@ -374,7 +374,7 @@ func TestRouter_StreamResponse(t *testing.T) {
 
 	eng := engine.New(st, exec, nil)
 	ch := &mockChannel{name: "test"}
-	r := NewRouter(eng, nil)
+	r := NewRouter(eng, st, nil)
 	r.Add(ch)
 
 	ctx := context.Background()
@@ -471,7 +471,7 @@ func TestRouter_MultiChannel(t *testing.T) {
 	ch1 := &mockChannel{name: "telegram"}
 	ch2 := &mockChannel{name: "feishu"}
 
-	r := NewRouter(eng, nil)
+	r := NewRouter(eng, st, nil)
 	r.Add(ch1)
 	r.Add(ch2)
 

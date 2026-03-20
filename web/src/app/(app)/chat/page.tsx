@@ -11,6 +11,100 @@ import type { Session, Message } from "@/lib/types";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+// ---------------------------------------------------------------------------
+// useWebSocket hook -- inline, with auto-reconnect + exponential backoff
+// ---------------------------------------------------------------------------
+type WsStatus = "connected" | "reconnecting" | "disconnected";
+
+interface WsMessage {
+  type: "token" | "done" | "error";
+  content?: string;
+}
+
+function useWebSocket(sessionId: string | null) {
+  const wsRef = useRef<WebSocket | null>(null);
+  const [status, setStatus] = useState<WsStatus>("disconnected");
+  const [lastMessage, setLastMessage] = useState<WsMessage | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backoffRef = useRef(1000);
+  const intentionalClose = useRef(false);
+
+  const connect = useCallback(() => {
+    if (!sessionId) return;
+    const token = typeof window !== "undefined" ? localStorage.getItem("abox_token") : null;
+    if (!token) return;
+
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const url = `${proto}//${window.location.host}/api/v1/ws/${sessionId}?token=${encodeURIComponent(token)}`;
+
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+
+    ws.addEventListener("open", () => {
+      setStatus("connected");
+      backoffRef.current = 1000; // reset backoff on success
+    });
+
+    ws.addEventListener("message", (event) => {
+      try {
+        const data: WsMessage = JSON.parse(event.data);
+        setLastMessage(data);
+      } catch {
+        // ignore malformed frames
+      }
+    });
+
+    ws.addEventListener("close", () => {
+      wsRef.current = null;
+      if (intentionalClose.current) {
+        setStatus("disconnected");
+        return;
+      }
+      setStatus("reconnecting");
+      const delay = Math.min(backoffRef.current, 30000);
+      backoffRef.current = delay * 2;
+      reconnectTimer.current = setTimeout(() => {
+        connect();
+      }, delay);
+    });
+
+    ws.addEventListener("error", () => {
+      // The close event will fire after this, which handles reconnect.
+    });
+  }, [sessionId]);
+
+  // Connect / reconnect whenever sessionId changes
+  useEffect(() => {
+    intentionalClose.current = false;
+    connect();
+
+    return () => {
+      intentionalClose.current = true;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      setStatus("disconnected");
+      setLastMessage(null);
+      backoffRef.current = 1000;
+    };
+  }, [connect]);
+
+  const sendMessage = useCallback(
+    (content: string) => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "message", content }));
+        return true;
+      }
+      return false;
+    },
+    []
+  );
+
+  return { sendMessage: sendMessage, status, lastMessage };
+}
+
 export default function ChatPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -22,6 +116,45 @@ export default function ChatPage() {
   const [dragOver, setDragOver] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // WebSocket connection
+  const {
+    sendMessage: wsSend,
+    status: wsStatus,
+    lastMessage: wsLastMessage,
+  } = useWebSocket(activeSessionId);
+
+  // Accumulate tokens arriving over WebSocket while a message is in-flight
+  const wsFullTextRef = useRef("");
+  const wsStreamingRef = useRef(false);
+
+  useEffect(() => {
+    if (!wsLastMessage || !wsStreamingRef.current) return;
+
+    if (wsLastMessage.type === "token" && wsLastMessage.content) {
+      wsFullTextRef.current += wsLastMessage.content;
+      const text = wsFullTextRef.current;
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: "assistant", content: text };
+        return updated;
+      });
+    } else if (wsLastMessage.type === "done") {
+      wsStreamingRef.current = false;
+      setSending(false);
+    } else if (wsLastMessage.type === "error") {
+      wsStreamingRef.current = false;
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: `Error: ${wsLastMessage.content ?? "Unknown error"}`,
+        };
+        return updated;
+      });
+      setSending(false);
+    }
+  }, [wsLastMessage]);
 
   // Load sessions
   useEffect(() => {
@@ -121,6 +254,15 @@ export default function ChatPage() {
     // Add empty assistant message for streaming
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
+    // ---- WebSocket path (preferred) ----
+    if (wsStatus === "connected" && wsSend(text)) {
+      wsFullTextRef.current = "";
+      wsStreamingRef.current = true;
+      // The useEffect on wsLastMessage handles the rest.
+      return;
+    }
+
+    // ---- SSE fallback path ----
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("abox_token") : null;
       const ai = getAiSettings();
@@ -194,7 +336,7 @@ export default function ChatPage() {
       });
     }
     setSending(false);
-  }, [input, sending, activeSessionId, createSession]);
+  }, [input, sending, activeSessionId, createSession, wsStatus, wsSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -276,6 +418,17 @@ export default function ChatPage() {
           <span className="text-sm font-medium">
             {activeSessionId ? `Session ${activeSessionId.slice(0, 8)}` : "New Chat"}
           </span>
+          {activeSessionId && (
+            <span
+              className={cn(
+                "inline-block h-2 w-2 rounded-full",
+                wsStatus === "connected" && "bg-green-500",
+                wsStatus === "reconnecting" && "bg-yellow-500",
+                wsStatus === "disconnected" && "bg-red-500"
+              )}
+              title={`WebSocket: ${wsStatus}`}
+            />
+          )}
         </div>
 
         {/* Drag overlay */}

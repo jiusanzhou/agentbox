@@ -55,6 +55,7 @@ type Store interface {
 	CreateSubscription(ctx context.Context, sub *model.Subscription) error
 	GetSubscription(ctx context.Context, id string) (*model.Subscription, error)
 	GetActiveSubscription(ctx context.Context, userID, agentID string) (*model.Subscription, error)
+	GetSubscriptionByStripeSubID(ctx context.Context, stripeSubID string) (*model.Subscription, error)
 	UpdateSubscription(ctx context.Context, sub *model.Subscription) error
 	ListSubscriptions(ctx context.Context, userID string) ([]*model.Subscription, error)
 
@@ -77,6 +78,15 @@ type Store interface {
 	// Free quota
 	GetFreeQuotaUsage(ctx context.Context, userID, agentID, period string) (*model.FreeQuotaUsage, error)
 	IncrementFreeQuotaUsage(ctx context.Context, userID, agentID, period string, limit int64) error
+
+	// IM Binding methods
+	CreateIMBinding(ctx context.Context, binding *model.IMBinding) error
+	GetIMBindingByPlatform(ctx context.Context, platform, platformUserID string) (*model.IMBinding, error)
+	ListIMBindingsByUser(ctx context.Context, userID string) ([]*model.IMBinding, error)
+	DeleteIMBinding(ctx context.Context, id string) error
+	CreateBindingCode(ctx context.Context, code *model.BindingCode) error
+	GetBindingCode(ctx context.Context, code string) (*model.BindingCode, error)
+	DeleteBindingCode(ctx context.Context, code string) error
 }
 
 // New creates a new Store from a TypedLazyConfig.
