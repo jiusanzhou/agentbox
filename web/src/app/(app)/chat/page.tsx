@@ -2,8 +2,6 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { clientFetch, getAiSettings } from "@/lib/api";
@@ -12,7 +10,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 // ---------------------------------------------------------------------------
-// useWebSocket hook -- inline, with auto-reconnect + exponential backoff
+// useWebSocket hook
 // ---------------------------------------------------------------------------
 type WsStatus = "connected" | "reconnecting" | "disconnected";
 
@@ -42,7 +40,7 @@ function useWebSocket(sessionId: string | null) {
 
     ws.addEventListener("open", () => {
       setStatus("connected");
-      backoffRef.current = 1000; // reset backoff on success
+      backoffRef.current = 1000;
     });
 
     ws.addEventListener("message", (event) => {
@@ -68,12 +66,9 @@ function useWebSocket(sessionId: string | null) {
       }, delay);
     });
 
-    ws.addEventListener("error", () => {
-      // The close event will fire after this, which handles reconnect.
-    });
+    ws.addEventListener("error", () => {});
   }, [sessionId]);
 
-  // Connect / reconnect whenever sessionId changes
   useEffect(() => {
     intentionalClose.current = false;
     connect();
@@ -102,7 +97,7 @@ function useWebSocket(sessionId: string | null) {
     []
   );
 
-  return { sendMessage: sendMessage, status, lastMessage };
+  return { sendMessage, status, lastMessage };
 }
 
 export default function ChatPage() {
@@ -117,14 +112,12 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // WebSocket connection
   const {
     sendMessage: wsSend,
     status: wsStatus,
     lastMessage: wsLastMessage,
   } = useWebSocket(activeSessionId);
 
-  // Accumulate tokens arriving over WebSocket while a message is in-flight
   const wsFullTextRef = useRef("");
   const wsStreamingRef = useRef(false);
 
@@ -156,7 +149,6 @@ export default function ChatPage() {
     }
   }, [wsLastMessage]);
 
-  // Load sessions
   useEffect(() => {
     clientFetch("/api/sessions")
       .then((r) => r.json())
@@ -166,7 +158,6 @@ export default function ChatPage() {
       .catch(() => {});
   }, []);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -250,19 +241,14 @@ export default function ChatPage() {
 
     const userMsg: Message = { role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
-
-    // Add empty assistant message for streaming
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
-    // ---- WebSocket path (preferred) ----
     if (wsStatus === "connected" && wsSend(text)) {
       wsFullTextRef.current = "";
       wsStreamingRef.current = true;
-      // The useEffect on wsLastMessage handles the rest.
       return;
     }
 
-    // ---- SSE fallback path ----
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("abox_token") : null;
       const ai = getAiSettings();
@@ -350,46 +336,56 @@ export default function ChatPage() {
     setMessages([]);
   };
 
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+
   return (
-    <div className="flex h-[calc(100vh-4rem)] -my-8 -mx-6">
+    <div className="flex h-[calc(100vh-3.5rem)] -my-8 -mx-6">
       {/* Session sidebar */}
       {sidebarOpen && (
-        <div className="w-64 flex-shrink-0 border-r border-border flex flex-col">
-          <div className="p-3 border-b border-border">
+        <div className="w-72 flex-shrink-0 border-r border-border flex flex-col bg-card/50">
+          <div className="p-4 border-b border-border">
             <Button
               size="sm"
-              className="w-full"
+              className="w-full h-9 text-sm"
               onClick={() => {
                 setActiveSessionId(null);
                 setMessages([]);
               }}
             >
-              New Session
+              <PlusIcon className="h-4 w-4 mr-2" />
+              New Chat
             </Button>
           </div>
           <ScrollArea className="flex-1">
-            <div className="p-2 space-y-1">
+            <div className="p-2 space-y-0.5">
               {sessions.map((s) => (
                 <button
                   key={s.id}
                   onClick={() => selectSession(s)}
                   className={cn(
-                    "w-full rounded-md px-3 py-2 text-left text-sm transition-colors",
+                    "w-full rounded-lg px-3 py-2.5 text-left transition-all duration-150",
                     activeSessionId === s.id
-                      ? "bg-accent text-accent-foreground"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                      ? "bg-accent border-l-2 border-foreground"
+                      : "hover:bg-accent/50"
                   )}
                 >
-                  <p className="font-medium truncate">
-                    {s.system_prompt ? s.system_prompt.slice(0, 30) : `Session ${(s.id || '').slice(0, 8)}`}
-                  </p>
-                  <p className="text-xs opacity-60 mt-0.5">
-                    {s.created_at ? new Date(s.created_at).toLocaleDateString() : ""}
+                  <div className="flex items-center gap-2">
+                    <AgentIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <p className="text-sm font-medium truncate flex-1">
+                      {s.system_prompt
+                        ? s.system_prompt.slice(0, 30)
+                        : `Session ${(s.id || "").slice(0, 8)}`}
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5 ml-6">
+                    {s.created_at
+                      ? new Date(s.created_at).toLocaleDateString()
+                      : ""}
                   </p>
                 </button>
               ))}
               {sessions.length === 0 && (
-                <p className="px-3 py-4 text-xs text-muted-foreground text-center">
+                <p className="px-3 py-8 text-xs text-muted-foreground text-center">
                   No sessions yet
                 </p>
               )}
@@ -400,42 +396,47 @@ export default function ChatPage() {
 
       {/* Chat area */}
       <div
-        className={cn("flex flex-1 flex-col min-w-0", dragOver && "ring-2 ring-primary ring-inset")}
+        className={cn(
+          "flex flex-1 flex-col min-w-0 relative",
+          dragOver && "ring-2 ring-foreground ring-inset"
+        )}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
       >
         {/* Chat header */}
-        <div className="flex items-center gap-2 border-b border-border px-4 py-2">
-          <Button
-            variant="ghost"
-            size="sm"
+        <div className="flex items-center gap-3 border-b border-border px-4 h-12 flex-shrink-0">
+          <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="h-8 w-8 p-0"
+            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
           >
             <SidebarIcon className="h-4 w-4" />
-          </Button>
-          <span className="text-sm font-medium">
-            {activeSessionId ? `Session ${activeSessionId.slice(0, 8)}` : "New Chat"}
-          </span>
-          {activeSessionId && (
-            <span
-              className={cn(
-                "inline-block h-2 w-2 rounded-full",
-                wsStatus === "connected" && "bg-green-500",
-                wsStatus === "reconnecting" && "bg-yellow-500",
-                wsStatus === "disconnected" && "bg-red-500"
-              )}
-              title={`WebSocket: ${wsStatus}`}
-            />
-          )}
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">
+              {activeSessionId
+                ? `Session ${activeSessionId.slice(0, 8)}`
+                : "New Chat"}
+            </span>
+            {activeSessionId && (
+              <span
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  wsStatus === "connected" && "bg-emerald-500",
+                  wsStatus === "reconnecting" && "bg-yellow-500 animate-pulse",
+                  wsStatus === "disconnected" && "bg-muted-foreground/30"
+                )}
+                title={`WebSocket: ${wsStatus}`}
+              />
+            )}
+          </div>
         </div>
 
         {/* Drag overlay */}
         {dragOver && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 pointer-events-none">
-            <div className="rounded-lg border-2 border-dashed border-primary p-8 text-center">
-              <PaperclipIcon className="h-8 w-8 mx-auto mb-2 text-primary" />
+            <div className="rounded-xl border-2 border-dashed border-foreground/20 p-8 text-center">
+              <PaperclipIcon className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
               <p className="text-sm font-medium">Drop file to upload</p>
             </div>
           </div>
@@ -445,11 +446,12 @@ export default function ChatPage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
           {messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">
-              <div className="text-center">
-                <p className="text-lg font-medium text-muted-foreground">
-                  Start a conversation
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground/60">
+              <div className="text-center space-y-2">
+                <div className="mx-auto h-12 w-12 rounded-full border border-border flex items-center justify-center">
+                  <AgentIcon className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <p className="text-base font-medium">Start a conversation</p>
+                <p className="text-sm text-muted-foreground">
                   Send a message to begin chatting with an AI agent
                 </p>
               </div>
@@ -464,30 +466,32 @@ export default function ChatPage() {
                     msg.role === "user" ? "justify-end" : "justify-start"
                   )}
                 >
-                  <Card
+                  <div
                     className={cn(
-                      "max-w-[80%] px-4 py-3",
+                      "max-w-[70%] rounded-2xl px-4 py-3",
                       msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
+                        ? "bg-foreground text-background"
                         : "bg-muted"
                     )}
                   >
                     {msg.role === "assistant" ? (
                       msg.content ? (
-                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:rounded-md [&_pre]:overflow-x-auto [&_code:not(pre_code)]:bg-muted [&_code:not(pre_code)]:rounded [&_code:not(pre_code)]:px-1">
+                        <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&_pre]:bg-background/50 [&_pre]:p-3 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_pre]:border [&_pre]:border-border [&_code:not(pre_code)]:bg-background/50 [&_code:not(pre_code)]:rounded [&_code:not(pre_code)]:px-1 [&_code:not(pre_code)]:text-xs">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {msg.content}
                           </ReactMarkdown>
                         </div>
-                      ) : (
-                        sending ? (
-                          <span className="text-sm text-muted-foreground animate-pulse">Thinking...</span>
-                        ) : null
-                      )
+                      ) : sending ? (
+                        <div className="flex items-center gap-1 py-1">
+                          <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                          <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                          <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                        </div>
+                      ) : null
                     ) : (
                       <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                     )}
-                  </Card>
+                  </div>
                 </div>
               ))}
             </div>
@@ -496,48 +500,59 @@ export default function ChatPage() {
 
         {/* Input */}
         <div className="border-t border-border p-4">
-          <div className="mx-auto max-w-2xl flex gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleUpload(file);
-                e.target.value = "";
-              }}
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 w-9 p-0 flex-shrink-0"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!activeSessionId || uploading}
-              title={activeSessionId ? "Upload file" : "Start a session first"}
-            >
-              {uploading ? (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              ) : (
-                <PaperclipIcon className="h-4 w-4" />
-              )}
-            </Button>
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
-              disabled={sending}
-              className="flex-1"
-            />
-            <Button onClick={sendMessage} disabled={sending || !input.trim()}>
-              Send
-            </Button>
+          <div className="mx-auto max-w-2xl">
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 focus-within:border-foreground/20 transition-colors">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUpload(file);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex-shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!activeSessionId || uploading}
+                title={activeSessionId ? "Upload file" : "Start a session first"}
+              >
+                {uploading ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                ) : (
+                  <PaperclipIcon className="h-4 w-4" />
+                )}
+              </button>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type a message..."
+                disabled={sending}
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
+              <button
+                onClick={sendMessage}
+                disabled={sending || !input.trim()}
+                className={cn(
+                  "h-8 w-8 flex items-center justify-center rounded-lg transition-all duration-150 flex-shrink-0",
+                  input.trim()
+                    ? "bg-foreground text-background hover:opacity-80"
+                    : "text-muted-foreground"
+                )}
+              >
+                <ArrowUpIcon className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+/* ─── Icons ─── */
 
 function SidebarIcon({ className }: { className?: string }) {
   return (
@@ -552,6 +567,35 @@ function PaperclipIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  );
+}
+
+function ArrowUpIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 19V5" />
+      <path d="m5 12 7-7 7 7" />
+    </svg>
+  );
+}
+
+function PlusIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function AgentIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+      <line x1="9" y1="9" x2="9.01" y2="9" />
+      <line x1="15" y1="9" x2="15.01" y2="9" />
     </svg>
   );
 }

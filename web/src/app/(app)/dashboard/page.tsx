@@ -2,9 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/lib/auth";
 import { clientFetch } from "@/lib/api";
 
@@ -68,20 +65,6 @@ interface DashboardResponse {
 
 type ChartView = "compute" | "tokens" | "api_calls";
 
-const TYPE_LABELS: Record<string, string> = {
-  compute: "Compute",
-  tokens: "Tokens",
-  storage: "Storage",
-  api: "API",
-};
-
-const TYPE_EMOJI: Record<string, string> = {
-  compute: "🖥️",
-  tokens: "🔤",
-  storage: "💾",
-  api: "🔌",
-};
-
 function fmtNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
@@ -107,20 +90,7 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
-    year: "numeric",
   });
-}
-
-function quotaColor(pct: number): string {
-  if (pct > 80) return "bg-red-500";
-  if (pct > 60) return "bg-yellow-500";
-  return "bg-emerald-500";
-}
-
-function quotaTextColor(pct: number): string {
-  if (pct > 80) return "text-red-500";
-  if (pct > 60) return "text-yellow-500";
-  return "text-emerald-500";
 }
 
 function pct(used: number, limit: number): number {
@@ -128,63 +98,44 @@ function pct(used: number, limit: number): number {
   return Math.min(100, Math.round((used / limit) * 100));
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────
-
-function SkeletonBar({ className = "" }: { className?: string }) {
-  return (
-    <div
-      className={`animate-pulse rounded bg-muted ${className}`}
-    />
-  );
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
 }
 
-function QuotaCard({
-  title,
-  usedLabel,
-  limitLabel,
-  percent,
+// ─── Sub-components ────────────────────────────────────────────────────────
+
+function Skeleton({ className = "", style }: { className?: string; style?: React.CSSProperties }) {
+  return <div className={`animate-pulse rounded bg-muted ${className}`} style={style} />;
+}
+
+function StatCard({
+  label,
+  value,
   loading,
 }: {
-  title: string;
-  usedLabel: string;
-  limitLabel: string;
-  percent: number;
+  label: string;
+  value: string;
   loading: boolean;
 }) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
-          {title}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {loading ? (
-          <>
-            <SkeletonBar className="h-7 w-24" />
-            <SkeletonBar className="h-2 w-full" />
-          </>
-        ) : (
-          <>
-            <div className="flex items-baseline justify-between gap-2">
-              <span className={`text-2xl font-bold tabular-nums ${quotaTextColor(percent)}`}>
-                {usedLabel}
-              </span>
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                / {limitLabel}
-              </span>
-            </div>
-            <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${quotaColor(percent)}`}
-                style={{ width: `${percent}%` }}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">{percent}% used</p>
-          </>
-        )}
-      </CardContent>
-    </Card>
+    <div className="rounded-xl border border-border p-6 transition-colors hover:border-foreground/20">
+      {loading ? (
+        <>
+          <Skeleton className="h-9 w-20" />
+          <Skeleton className="mt-2 h-4 w-24" />
+        </>
+      ) : (
+        <>
+          <p className="text-3xl font-bold tracking-tight tabular-nums">
+            {value}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{label}</p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -210,50 +161,58 @@ function UsageChart({
 
   const maxVal = loading ? 1 : Math.max(...daily.map(getValue), 1);
 
-  const viewBtnClass = (v: ChartView) =>
-    `px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-      view === v
-        ? "bg-primary text-primary-foreground"
-        : "text-muted-foreground hover:text-foreground hover:bg-muted"
-    }`;
+  const views: { key: ChartView; label: string }[] = [
+    { key: "compute", label: "Compute" },
+    { key: "tokens", label: "Tokens" },
+    { key: "api_calls", label: "API Calls" },
+  ];
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <CardTitle className="text-base font-semibold">
-            Daily Usage — {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}
-          </CardTitle>
-          <div className="flex items-center gap-1 rounded-lg border p-1">
-            <button className={viewBtnClass("compute")} onClick={() => setView("compute")}>
-              Compute
-            </button>
-            <button className={viewBtnClass("tokens")} onClick={() => setView("tokens")}>
-              Tokens
-            </button>
-            <button className={viewBtnClass("api_calls")} onClick={() => setView("api_calls")}>
-              API Calls
-            </button>
-          </div>
+    <div className="rounded-xl border border-border p-6">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className="text-sm font-semibold">Daily Usage</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {new Date().toLocaleDateString("en-US", {
+              month: "long",
+              year: "numeric",
+            })}
+          </p>
         </div>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="flex items-end gap-1 h-40">
-            {Array.from({ length: 20 }).map((_, i) => (
-              <SkeletonBar
-                key={i}
-                className="flex-1"
-                style={{ height: `${20 + Math.random() * 60}%` } as React.CSSProperties}
-              />
-            ))}
-          </div>
-        ) : daily.length === 0 ? (
-          <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">
-            No data for this period
-          </div>
-        ) : (
-          <div className="flex items-end gap-px sm:gap-1 h-40 overflow-x-auto">
+        <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+          {views.map((v) => (
+            <button
+              key={v.key}
+              onClick={() => setView(v.key)}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition-all duration-150 ${
+                view === v.key
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-end gap-1 h-44">
+          {Array.from({ length: 20 }).map((_, i) => (
+            <Skeleton
+              key={i}
+              className="flex-1"
+              style={{ height: `${20 + Math.random() * 60}%` } as React.CSSProperties}
+            />
+          ))}
+        </div>
+      ) : daily.length === 0 ? (
+        <div className="h-44 flex items-center justify-center text-sm text-muted-foreground">
+          No data for this period
+        </div>
+      ) : (
+        <>
+          <div className="flex items-end gap-px h-44">
             {daily.map((entry) => {
               const val = getValue(entry);
               const heightPct = maxVal > 0 ? (val / maxVal) * 100 : 0;
@@ -264,30 +223,29 @@ function UsageChart({
               return (
                 <div
                   key={entry.date}
-                  className="group relative flex-1 min-w-[10px] flex flex-col justify-end"
+                  className="group relative flex-1 min-w-[6px] flex flex-col justify-end"
                   style={{ height: "100%" }}
                 >
                   <div
-                    className="rounded-sm bg-primary/70 hover:bg-primary transition-colors cursor-default"
+                    className="rounded-sm bg-foreground/20 hover:bg-foreground/40 transition-colors cursor-default"
                     style={{ height: `${Math.max(heightPct, val > 0 ? 2 : 0)}%` }}
                   />
-                  {/* Tooltip */}
-                  <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 z-10 hidden group-hover:flex flex-col items-center pointer-events-none">
-                    <div className="bg-popover border rounded shadow-md px-2 py-1 text-xs whitespace-nowrap">
+                  <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-10 hidden group-hover:flex flex-col items-center pointer-events-none">
+                    <div className="bg-foreground text-background rounded-lg px-2.5 py-1.5 text-xs whitespace-nowrap">
                       <p className="font-medium">{dayLabel}</p>
-                      <p className="text-muted-foreground">{formatValue(val)}</p>
+                      <p className="opacity-70">{formatValue(val)}</p>
                     </div>
-                    <div className="w-px h-1 bg-border" />
                   </div>
                 </div>
               );
             })}
           </div>
-        )}
-        {!loading && daily.length > 0 && (
-          <div className="flex justify-between mt-1 text-[10px] text-muted-foreground">
+          <div className="flex justify-between mt-2 text-[10px] text-muted-foreground">
             <span>
-              {new Date(daily[0].date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              {new Date(daily[0].date).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              })}
             </span>
             <span>
               {new Date(daily[daily.length - 1].date).toLocaleDateString("en-US", {
@@ -296,36 +254,13 @@ function UsageChart({
               })}
             </span>
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </>
+      )}
+    </div>
   );
 }
 
-function TypeBadge({ type }: { type: string }) {
-  const emoji = TYPE_EMOJI[type] ?? "📦";
-  const label = TYPE_LABELS[type] ?? type;
-
-  const colorMap: Record<string, string> = {
-    compute: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
-    tokens: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
-    storage: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
-    api: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300",
-  };
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
-        colorMap[type] ?? "bg-muted text-muted-foreground"
-      }`}
-    >
-      <span>{emoji}</span>
-      {label}
-    </span>
-  );
-}
-
-function ActivityTable({
+function RecentRunsTable({
   records,
   loading,
 }: {
@@ -333,152 +268,103 @@ function ActivityTable({
   loading: boolean;
 }) {
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base font-semibold">Recent Activity</CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">
-                  Date
-                </th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">
-                  Type
-                </th>
-                <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">
-                  Amount
-                </th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">
-                  Run / Session
-                </th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
-                  Description
-                </th>
+    <div className="rounded-xl border border-border overflow-hidden">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <h3 className="text-sm font-semibold">Recent Activity</h3>
+        <Link
+          href="/runs"
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          View all &rarr;
+        </Link>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border bg-muted/30">
+              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground">
+                Date
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground">
+                Type
+              </th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground">
+                Amount
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground">
+                Run ID
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground">
+                Description
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <tr key={i} className="border-b border-border last:border-0">
+                  {Array.from({ length: 5 }).map((_, j) => (
+                    <td key={j} className="px-6 py-3.5">
+                      <Skeleton className="h-4 w-20" />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : records.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-6 py-12 text-center text-sm text-muted-foreground"
+                >
+                  No activity recorded yet
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b">
-                    {Array.from({ length: 5 }).map((_, j) => (
-                      <td key={j} className="px-4 py-3">
-                        <SkeletonBar className="h-4 w-full max-w-[120px]" />
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              ) : records.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">
-                    No activity recorded yet
+            ) : (
+              records.map((record) => (
+                <tr
+                  key={record.id}
+                  className="border-b border-border last:border-0 transition-colors hover:bg-muted/30"
+                >
+                  <td className="px-6 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
+                    {fmtDate(record.created_at)}
+                  </td>
+                  <td className="px-6 py-3.5 whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          record.type === "compute"
+                            ? "bg-foreground"
+                            : record.type === "tokens"
+                            ? "bg-foreground/60"
+                            : record.type === "api"
+                            ? "bg-foreground/40"
+                            : "bg-foreground/20"
+                        }`}
+                      />
+                      <span className="text-sm capitalize">{record.type}</span>
+                    </span>
+                  </td>
+                  <td className="px-6 py-3.5 text-right font-mono text-sm tabular-nums whitespace-nowrap">
+                    {fmtNumber(record.amount)}{" "}
+                    <span className="text-muted-foreground text-xs">{record.unit}</span>
+                  </td>
+                  <td className="px-6 py-3.5 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                    {record.run_id
+                      ? record.run_id.slice(0, 8)
+                      : record.session_id
+                      ? record.session_id.slice(0, 8)
+                      : "\u2014"}
+                  </td>
+                  <td className="px-6 py-3.5 text-sm text-muted-foreground max-w-[240px] truncate">
+                    {record.description || "\u2014"}
                   </td>
                 </tr>
-              ) : (
-                records.map((record) => (
-                  <tr
-                    key={record.id}
-                    className="border-b last:border-0 hover:bg-muted/30 transition-colors"
-                  >
-                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                      {fmtDate(record.created_at)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <TypeBadge type={record.type} />
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs whitespace-nowrap">
-                      {fmtNumber(record.amount)}{" "}
-                      <span className="text-muted-foreground">{record.unit}</span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                      {record.run_id
-                        ? record.run_id.slice(0, 8)
-                        : record.session_id
-                        ? record.session_id.slice(0, 8)
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground max-w-[240px] truncate">
-                      {record.description || "—"}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function PlanCard({
-  quota,
-  summary,
-  loading,
-}: {
-  quota: QuotaInfo | null;
-  summary: UsageSummary | null;
-  loading: boolean;
-}) {
-  const tierColor = (plan: string) => {
-    const p = plan?.toLowerCase() ?? "";
-    if (p.includes("pro")) return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
-    if (p.includes("team") || p.includes("enterprise"))
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
-    return "bg-muted text-muted-foreground";
-  };
-
-  const planName = quota?.plan ?? "Free";
-  const period = summary?.period ?? "";
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base font-semibold">Current Plan</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {loading ? (
-          <>
-            <SkeletonBar className="h-6 w-24" />
-            <SkeletonBar className="h-4 w-40" />
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-2">
-              <span className="text-2xl font-bold capitalize">{planName}</span>
-              <span
-                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${tierColor(
-                  planName
-                )}`}
-              >
-                {planName.toUpperCase()}
-              </span>
-            </div>
-            {period && (
-              <p className="text-xs text-muted-foreground">
-                Billing period:{" "}
-                <span className="font-medium text-foreground">{period}</span>
-              </p>
+              ))
             )}
-            {summary?.estimated_cost != null && (
-              <p className="text-xs text-muted-foreground">
-                Estimated cost this period:{" "}
-                <span className="font-medium text-foreground">
-                  ${summary.estimated_cost.toFixed(2)}
-                </span>
-              </p>
-            )}
-            <Link href="/billing">
-              <Button size="sm" className="mt-2 w-full sm:w-auto">
-                Upgrade Plan
-              </Button>
-            </Link>
-          </>
-        )}
-      </CardContent>
-    </Card>
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -520,91 +406,72 @@ export default function DashboardPage() {
     load();
   }, []);
 
-  // Derived quota values
   const quota = quotaData?.quota ?? null;
   const usageSummary = quotaData?.usage ?? summary;
 
   const computeUsed = usageSummary?.compute_seconds ?? 0;
-  const computeLimit = quota?.compute_limit ?? 0;
-  const computePct = pct(computeUsed, computeLimit);
-
   const tokensUsed = usageSummary?.token_count ?? 0;
-  const tokensLimit = quota?.token_limit ?? 0;
-  const tokensPct = pct(tokensUsed, tokensLimit);
-
   const storageUsed = usageSummary?.storage_bytes ?? 0;
-  const storageLimit = quota?.storage_limit ?? 0;
-  const storagePct = pct(storageUsed, storageLimit);
-
   const apiUsed = usageSummary?.api_calls ?? 0;
-  const apiLimit = quota?.api_call_limit ?? 0;
-  const apiPct = pct(apiUsed, apiLimit);
 
   const daily = dashData?.daily ?? [];
 
+  const currentDate = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
   return (
     <div className="space-y-8">
-      {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Usage Dashboard
+      {/* Welcome header */}
+      <div className="animate-fade-in">
+        <h1 className="text-2xl font-bold tracking-tight">
+          {getGreeting()}, {user?.name || "there"}
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Monitor your resource consumption and quota usage
-          {user?.name ? `, ${user.name}` : ""}.
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{currentDate}</p>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      {/* Top stats row */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <QuotaCard
-          title="Compute Time"
-          usedLabel={fmtSeconds(computeUsed)}
-          limitLabel={computeLimit ? fmtSeconds(computeLimit) : "Unlimited"}
-          percent={computePct}
+      {/* Stats row */}
+      <div className="animate-fade-in animate-delay-100 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Compute Time"
+          value={loading ? "" : fmtSeconds(computeUsed)}
           loading={loading}
         />
-        <QuotaCard
-          title="Tokens Used"
-          usedLabel={fmtNumber(tokensUsed)}
-          limitLabel={tokensLimit ? fmtNumber(tokensLimit) : "Unlimited"}
-          percent={tokensPct}
+        <StatCard
+          label="Tokens Used"
+          value={loading ? "" : fmtNumber(tokensUsed)}
           loading={loading}
         />
-        <QuotaCard
-          title="Storage"
-          usedLabel={fmtBytes(storageUsed)}
-          limitLabel={storageLimit ? fmtBytes(storageLimit) : "Unlimited"}
-          percent={storagePct}
+        <StatCard
+          label="Storage"
+          value={loading ? "" : fmtBytes(storageUsed)}
           loading={loading}
         />
-        <QuotaCard
-          title="API Calls"
-          usedLabel={fmtNumber(apiUsed)}
-          limitLabel={apiLimit ? fmtNumber(apiLimit) : "Unlimited"}
-          percent={apiPct}
+        <StatCard
+          label="API Calls"
+          value={loading ? "" : fmtNumber(apiUsed)}
           loading={loading}
         />
       </div>
 
-      {/* Chart + Plan side-by-side on large screens */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <UsageChart daily={daily} loading={loading} />
-        </div>
-        <div>
-          <PlanCard quota={quota} summary={usageSummary ?? null} loading={loading} />
-        </div>
+      {/* Usage chart */}
+      <div className="animate-fade-in animate-delay-200">
+        <UsageChart daily={daily} loading={loading} />
       </div>
 
       {/* Activity table */}
-      <ActivityTable records={history} loading={loading} />
+      <div className="animate-fade-in animate-delay-300">
+        <RecentRunsTable records={history} loading={loading} />
+      </div>
     </div>
   );
 }
