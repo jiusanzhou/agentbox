@@ -1,173 +1,428 @@
 package agent
 
 import (
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestParseExample(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("schema", "examples", "rust-proxy-expert.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
+// ---------------------------------------------------------------------------
+// Helper: build a minimal valid manifest
+// ---------------------------------------------------------------------------
 
-	m, err := Parse(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if m.ID != "rust-proxy-expert" {
-		t.Errorf("id = %q, want rust-proxy-expert", m.ID)
-	}
-	if m.Name != "锈刃" {
-		t.Errorf("name = %q, want 锈刃", m.Name)
-	}
-	if m.Version != "1.0.0" {
-		t.Errorf("version = %q, want 1.0.0", m.Version)
-	}
-	if m.Persona == nil {
-		t.Fatal("persona is nil")
-	}
-	if m.Persona.Style == "" {
-		t.Error("persona.style is empty")
-	}
-	if len(m.Persona.Language) != 2 {
-		t.Errorf("persona.language len = %d, want 2", len(m.Persona.Language))
-	}
-	if len(m.Skills) != 3 {
-		t.Errorf("skills len = %d, want 3", len(m.Skills))
-	}
-	if m.Adapters == nil {
-		t.Fatal("adapters is nil")
-	}
-	if len(m.Adapters.Frameworks) != 2 {
-		t.Errorf("frameworks len = %d, want 2", len(m.Adapters.Frameworks))
-	}
-	if m.Adapters.Tools == nil || len(m.Adapters.Tools.Required) != 4 {
-		t.Errorf("required tools len unexpected")
-	}
-	if len(m.Adapters.AgentApps) != 1 {
-		t.Errorf("agent_apps len = %d, want 1", len(m.Adapters.AgentApps))
-	}
-	if m.Model == nil || m.Model.Recommended != "opus" {
-		t.Errorf("model.recommended = %v, want opus", m.Model)
-	}
-	if m.Experience == nil || m.Experience.Level != "senior" {
-		t.Errorf("experience.level unexpected")
-	}
-	if m.Experience.Packs != 47 {
-		t.Errorf("experience.packs = %d, want 47", m.Experience.Packs)
-	}
-	if len(m.Experience.Highlights) != 3 {
-		t.Errorf("highlights len = %d, want 3", len(m.Experience.Highlights))
-	}
-	if m.Marketplace == nil || m.Marketplace.Pricing == nil {
-		t.Fatal("marketplace.pricing is nil")
-	}
-	if m.Marketplace.Pricing.Trial != 10 {
-		t.Errorf("pricing.trial = %d, want 10", m.Marketplace.Pricing.Trial)
-	}
-}
-
-func TestPreferredFramework(t *testing.T) {
-	m := &Manifest{
-		Adapters: &Adapters{
-			Frameworks: []FrameworkRef{
-				{Name: "langchain", Native: false},
-				{Name: "openclaw", Native: true},
-			},
+func validManifest() Manifest {
+	return Manifest{
+		ID:          "my-agent",
+		Name:        "My Agent",
+		Version:     "1.0.0",
+		Description: "A test agent",
+		Persona: &Persona{
+			Style: "professional",
+			Tone:  "concise",
 		},
 	}
-	if got := m.PreferredFramework(); got != "openclaw" {
-		t.Errorf("PreferredFramework = %q, want openclaw", got)
-	}
 }
 
-func TestPreferredFrameworkNoNative(t *testing.T) {
-	m := &Manifest{
-		Adapters: &Adapters{
-			Frameworks: []FrameworkRef{
-				{Name: "langchain"},
-				{Name: "crewai"},
-			},
-		},
-	}
-	if got := m.PreferredFramework(); got != "langchain" {
-		t.Errorf("PreferredFramework = %q, want langchain (first)", got)
-	}
+// ---------------------------------------------------------------------------
+// TestParse
+// ---------------------------------------------------------------------------
+
+func TestParse(t *testing.T) {
+	t.Run("valid yaml", func(t *testing.T) {
+		yaml := `
+id: test-agent
+name: Test Agent
+version: "1.0.0"
+description: A simple test agent
+persona:
+  style: friendly
+  tone: casual
+`
+		m, err := Parse([]byte(yaml))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if m.ID != "test-agent" {
+			t.Errorf("ID = %q, want test-agent", m.ID)
+		}
+		if m.Name != "Test Agent" {
+			t.Errorf("Name = %q, want Test Agent", m.Name)
+		}
+		if m.Version != "1.0.0" {
+			t.Errorf("Version = %q, want 1.0.0", m.Version)
+		}
+		if m.Persona == nil || m.Persona.Style != "friendly" {
+			t.Errorf("Persona.Style mismatch")
+		}
+	})
+
+	t.Run("invalid yaml syntax", func(t *testing.T) {
+		_, err := Parse([]byte(`{{{not yaml at all`))
+		if err == nil {
+			t.Fatal("expected error for invalid YAML")
+		}
+	})
+
+	t.Run("yaml that fails validation", func(t *testing.T) {
+		yaml := `
+id: ""
+name: ""
+`
+		_, err := Parse([]byte(yaml))
+		if err == nil {
+			t.Fatal("expected validation error")
+		}
+	})
+
+	t.Run("valid yaml with all optional fields", func(t *testing.T) {
+		yaml := `
+id: full-agent
+name: Full
+version: "2.0.0"
+description: Full agent
+emoji: "🤖"
+author: zoe
+license: MIT
+persona:
+  style: analytical
+  tone: formal
+  language: [en, zh]
+  principles: [be precise]
+skills:
+  - name: coding
+    version: "^1.0"
+adapters:
+  frameworks:
+    - name: openclaw
+      native: true
+  tools:
+    required:
+      - name: exec
+model:
+  minimum: sonnet
+  recommended: opus
+experience:
+  level: senior
+  packs: 10
+marketplace:
+  category: development
+  tags: [rust, go]
+  pricing:
+    model: free
+`
+		m, err := Parse([]byte(yaml))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if m.Emoji != "🤖" {
+			t.Errorf("Emoji = %q", m.Emoji)
+		}
+		if len(m.Skills) != 1 {
+			t.Errorf("skills len = %d", len(m.Skills))
+		}
+		if m.Adapters == nil || len(m.Adapters.Frameworks) != 1 {
+			t.Error("adapters.frameworks mismatch")
+		}
+	})
 }
 
-func TestPreferredFrameworkEmpty(t *testing.T) {
-	m := &Manifest{}
-	if got := m.PreferredFramework(); got != "" {
-		t.Errorf("PreferredFramework = %q, want empty", got)
-	}
-}
+// ---------------------------------------------------------------------------
+// TestValidate
+// ---------------------------------------------------------------------------
 
-func TestRequiredTools(t *testing.T) {
-	m := &Manifest{
-		Adapters: &Adapters{
-			Tools: &ToolRequirements{
-				Required: []ToolRef{
-					{Name: "exec"},
-					{Name: "read"},
-				},
-			},
-		},
-	}
-	tools := m.RequiredTools()
-	if len(tools) != 2 || tools[0] != "exec" || tools[1] != "read" {
-		t.Errorf("RequiredTools = %v, want [exec read]", tools)
-	}
-}
-
-func TestValidateRequired(t *testing.T) {
+func TestValidate(t *testing.T) {
 	tests := []struct {
-		name string
-		m    Manifest
-		err  bool
+		name    string
+		mutate  func(*Manifest)
+		wantErr string
 	}{
-		{"empty id", Manifest{}, true},
-		{"bad id", Manifest{ID: "UPPER"}, true},
-		{"short id", Manifest{ID: "a"}, true},
-		{"no name", Manifest{ID: "ab"}, true},
-		{"no version", Manifest{ID: "ab", Name: "x"}, true},
-		{"bad version", Manifest{ID: "ab", Name: "x", Version: "abc"}, true},
-		{"no desc", Manifest{ID: "ab", Name: "x", Version: "1.0.0"}, true},
-		{"no persona", Manifest{ID: "ab", Name: "x", Version: "1.0.0", Description: "d"}, true},
-		{"no style", Manifest{ID: "ab", Name: "x", Version: "1.0.0", Description: "d", Persona: &Persona{Tone: "t"}}, true},
-		{"no tone", Manifest{ID: "ab", Name: "x", Version: "1.0.0", Description: "d", Persona: &Persona{Style: "s"}}, true},
-		{"valid", Manifest{ID: "ab", Name: "x", Version: "1.0.0", Description: "d", Persona: &Persona{Style: "s", Tone: "t"}}, false},
+		{"valid", func(m *Manifest) {}, ""},
+		{"empty id", func(m *Manifest) { m.ID = "" }, "id is required"},
+		{"invalid id (uppercase)", func(m *Manifest) { m.ID = "MyAgent" }, "invalid id"},
+		{"invalid id (single char)", func(m *Manifest) { m.ID = "a" }, "invalid id"},
+		{"empty name", func(m *Manifest) { m.Name = "" }, "name is required"},
+		{"long name", func(m *Manifest) { m.Name = strings.Repeat("x", 65) }, "name too long"},
+		{"name exactly 64", func(m *Manifest) { m.Name = strings.Repeat("x", 64) }, ""},
+		{"empty version", func(m *Manifest) { m.Version = "" }, "version is required"},
+		{"invalid version", func(m *Manifest) { m.Version = "abc" }, "invalid version"},
+		{"empty description", func(m *Manifest) { m.Description = "" }, "description is required"},
+		{"description too long", func(m *Manifest) { m.Description = strings.Repeat("x", 501) }, "description too long"},
+		{"nil persona", func(m *Manifest) { m.Persona = nil }, "persona is required"},
+		{"missing persona style", func(m *Manifest) { m.Persona.Style = "" }, "persona.style is required"},
+		{"missing persona tone", func(m *Manifest) { m.Persona.Tone = "" }, "persona.tone is required"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.m.Validate()
-			if (err != nil) != tt.err {
-				t.Errorf("Validate() error = %v, want err = %v", err, tt.err)
+			m := validManifest()
+			tt.mutate(&m)
+			err := m.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want substring %q", err, tt.wantErr)
+				}
 			}
 		})
 	}
 }
 
-func TestValidateExperienceLevel(t *testing.T) {
-	m := Manifest{
-		ID: "ab", Name: "x", Version: "1.0.0", Description: "d",
-		Persona:    &Persona{Style: "s", Tone: "t"},
-		Experience: &Experience{Level: "invalid"},
+// ---------------------------------------------------------------------------
+// TestValidateExperience
+// ---------------------------------------------------------------------------
+
+func TestValidateExperience(t *testing.T) {
+	validLevels := []string{"junior", "mid", "senior", "expert"}
+	for _, lvl := range validLevels {
+		t.Run("valid level "+lvl, func(t *testing.T) {
+			m := validManifest()
+			m.Experience = &Experience{Level: lvl}
+			if err := m.Validate(); err != nil {
+				t.Fatalf("unexpected error for level %q: %v", lvl, err)
+			}
+		})
 	}
-	if err := m.Validate(); err == nil {
-		t.Error("expected error for invalid experience level")
+
+	t.Run("invalid level", func(t *testing.T) {
+		m := validManifest()
+		m.Experience = &Experience{Level: "wizard"}
+		err := m.Validate()
+		if err == nil || !strings.Contains(err.Error(), "invalid experience level") {
+			t.Fatalf("error = %v, want 'invalid experience level'", err)
+		}
+	})
+
+	t.Run("empty level is valid", func(t *testing.T) {
+		m := validManifest()
+		m.Experience = &Experience{Level: ""}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("empty level should be valid: %v", err)
+		}
+	})
+
+	t.Run("highlight without id", func(t *testing.T) {
+		m := validManifest()
+		m.Experience = &Experience{
+			Highlights: []ExperienceHighlight{{ID: "", Summary: "did stuff"}},
+		}
+		err := m.Validate()
+		if err == nil || !strings.Contains(err.Error(), "highlight requires id and summary") {
+			t.Fatalf("error = %v, want highlight validation error", err)
+		}
+	})
+
+	t.Run("highlight without summary", func(t *testing.T) {
+		m := validManifest()
+		m.Experience = &Experience{
+			Highlights: []ExperienceHighlight{{ID: "h1", Summary: ""}},
+		}
+		err := m.Validate()
+		if err == nil || !strings.Contains(err.Error(), "highlight requires id and summary") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
+	t.Run("valid highlight", func(t *testing.T) {
+		m := validManifest()
+		m.Experience = &Experience{
+			Highlights: []ExperienceHighlight{{ID: "h1", Summary: "did stuff"}},
+		}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestValidatePricing
+// ---------------------------------------------------------------------------
+
+func TestValidatePricing(t *testing.T) {
+	validModels := []string{"free", "one-time", "subscription", "usage"}
+	for _, pm := range validModels {
+		t.Run("valid model "+pm, func(t *testing.T) {
+			m := validManifest()
+			m.Marketplace = &Marketplace{Pricing: &Pricing{Model: pm}}
+			if err := m.Validate(); err != nil {
+				t.Fatalf("unexpected error for model %q: %v", pm, err)
+			}
+		})
+	}
+
+	t.Run("empty model is valid", func(t *testing.T) {
+		m := validManifest()
+		m.Marketplace = &Marketplace{Pricing: &Pricing{Model: ""}}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("empty model should be valid: %v", err)
+		}
+	})
+
+	t.Run("invalid model", func(t *testing.T) {
+		m := validManifest()
+		m.Marketplace = &Marketplace{Pricing: &Pricing{Model: "barter"}}
+		err := m.Validate()
+		if err == nil || !strings.Contains(err.Error(), "invalid pricing model") {
+			t.Fatalf("error = %v, want 'invalid pricing model'", err)
+		}
+	})
+
+	t.Run("nil pricing with marketplace is valid", func(t *testing.T) {
+		m := validManifest()
+		m.Marketplace = &Marketplace{Tags: []string{"dev"}}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestPreferredFramework
+// ---------------------------------------------------------------------------
+
+func TestPreferredFramework(t *testing.T) {
+	t.Run("native framework returned", func(t *testing.T) {
+		m := &Manifest{Adapters: &Adapters{
+			Frameworks: []FrameworkRef{
+				{Name: "langchain", Native: false},
+				{Name: "openclaw", Native: true},
+			},
+		}}
+		if got := m.PreferredFramework(); got != "openclaw" {
+			t.Errorf("got %q, want openclaw", got)
+		}
+	})
+
+	t.Run("no native returns first", func(t *testing.T) {
+		m := &Manifest{Adapters: &Adapters{
+			Frameworks: []FrameworkRef{
+				{Name: "langchain"},
+				{Name: "crewai"},
+			},
+		}}
+		if got := m.PreferredFramework(); got != "langchain" {
+			t.Errorf("got %q, want langchain", got)
+		}
+	})
+
+	t.Run("nil adapters", func(t *testing.T) {
+		m := &Manifest{}
+		if got := m.PreferredFramework(); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("empty frameworks list", func(t *testing.T) {
+		m := &Manifest{Adapters: &Adapters{}}
+		if got := m.PreferredFramework(); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestRequiredTools
+// ---------------------------------------------------------------------------
+
+func TestRequiredTools(t *testing.T) {
+	t.Run("with tools", func(t *testing.T) {
+		m := &Manifest{Adapters: &Adapters{Tools: &ToolRequirements{
+			Required: []ToolRef{{Name: "exec"}, {Name: "read"}},
+		}}}
+		tools := m.RequiredTools()
+		if len(tools) != 2 || tools[0] != "exec" || tools[1] != "read" {
+			t.Errorf("RequiredTools = %v, want [exec read]", tools)
+		}
+	})
+
+	t.Run("nil adapters", func(t *testing.T) {
+		m := &Manifest{}
+		if tools := m.RequiredTools(); tools != nil {
+			t.Errorf("RequiredTools = %v, want nil", tools)
+		}
+	})
+
+	t.Run("nil tools", func(t *testing.T) {
+		m := &Manifest{Adapters: &Adapters{}}
+		if tools := m.RequiredTools(); tools != nil {
+			t.Errorf("RequiredTools = %v, want nil", tools)
+		}
+	})
+
+	t.Run("empty required list", func(t *testing.T) {
+		m := &Manifest{Adapters: &Adapters{Tools: &ToolRequirements{}}}
+		tools := m.RequiredTools()
+		if len(tools) != 0 {
+			t.Errorf("RequiredTools = %v, want empty", tools)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestIDPattern / TestVersionPattern
+// ---------------------------------------------------------------------------
+
+func TestIDPattern(t *testing.T) {
+	valid := []string{
+		"ab", "my-agent", "agent.v2", "a0", "rust-proxy-expert",
+		"a_b", "a-b.c", "a1234567890123456789012345678901234567890123456789012345678901b",
+	}
+	for _, id := range valid {
+		t.Run("valid/"+id, func(t *testing.T) {
+			if !idPattern.MatchString(id) {
+				t.Errorf("idPattern should match %q", id)
+			}
+		})
+	}
+
+	invalid := []string{
+		"", "a", "A", "UPPER", "-start", ".start", "_start",
+		"end-", "end.", "end_",
+		"has space", "has@symbol",
+		strings.Repeat("a", 65), // > 64 chars
+	}
+	for _, id := range invalid {
+		name := id
+		if name == "" {
+			name = "<empty>"
+		}
+		t.Run("invalid/"+name, func(t *testing.T) {
+			if idPattern.MatchString(id) {
+				t.Errorf("idPattern should NOT match %q", id)
+			}
+		})
 	}
 }
 
-func TestValidatePricingModel(t *testing.T) {
-	m := Manifest{
-		ID: "ab", Name: "x", Version: "1.0.0", Description: "d",
-		Persona:     &Persona{Style: "s", Tone: "t"},
-		Marketplace: &Marketplace{Pricing: &Pricing{Model: "invalid"}},
+func TestVersionPattern(t *testing.T) {
+	valid := []string{
+		"0.0.1", "1.0.0", "1.2.3", "0.1.0",
+		"1.0.0-alpha", "1.0.0-beta.1", "2.0.0-rc.1",
 	}
-	if err := m.Validate(); err == nil {
-		t.Error("expected error for invalid pricing model")
+	for _, v := range valid {
+		t.Run("valid/"+v, func(t *testing.T) {
+			if !versionPattern.MatchString(v) {
+				t.Errorf("versionPattern should match %q", v)
+			}
+		})
+	}
+
+	invalid := []string{
+		"", "abc", "1.0", "1", "v1.0.0", "1.0.0.0",
+		"1.0.0-", "1.0.0-beta!",
+	}
+	for _, v := range invalid {
+		name := v
+		if name == "" {
+			name = "<empty>"
+		}
+		t.Run("invalid/"+name, func(t *testing.T) {
+			if versionPattern.MatchString(v) {
+				t.Errorf("versionPattern should NOT match %q", v)
+			}
+		})
 	}
 }

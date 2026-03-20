@@ -12,10 +12,10 @@
   <a href="./README_CN.md">中文</a> · English
   <br />
   <br />
-  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go" alt="Go" /></a>
+  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go" alt="Go" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License" /></a>
   <a href="#"><img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="Build" /></a>
-  <a href="https://github.com/jiusanzhou/abox-skills"><img src="https://img.shields.io/badge/skills-20+-orange.svg" alt="Skills" /></a>
+  <a href="https://github.com/openagent-spec/registry"><img src="https://img.shields.io/badge/agents-60+-orange.svg" alt="Agents" /></a>
 </p>
 
 ---
@@ -184,6 +184,24 @@ ABox supports multiple agent backends. Set the runtime per run:
 aboxctl run examples/vm0-hn-curator/AGENTS.md
 aboxctl list
 aboxctl get <run-id>
+```
+
+### OpenAgent Registry
+
+Browse, install, and run agents from [OpenAgent Registry](https://github.com/openagent-spec/registry) — like Helm for AI agents:
+
+```bash
+# Search agents
+aboxctl agent search marketing
+
+# Install from registry
+aboxctl agent install marketing/cro-optimizer
+
+# One-click install + run
+aboxctl agent run cro-optimizer --runtime claude
+
+# Use a different registry
+aboxctl agent search seo --registry myorg/my-agents
 ```
 
 ### Interactive Chat
