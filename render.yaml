@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: abox
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: ABOX_ADDR
+        value: ":8080"
+      - key: ABOX_STORE_TYPE
+        value: sqlite
+      - key: ABOX_DATA_DIR
+        value: /data
+    disk:
+      name: abox-data
+      mountPath: /data
+      sizeGB: 1
+    healthCheckPath: /api/v1/healthz
+    plan: free

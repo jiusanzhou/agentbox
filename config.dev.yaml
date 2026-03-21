@@ -1,0 +1,33 @@
+# ABox configuration — local dev
+
+debug: true
+addr: ":8080"
+
+auth:
+  enabled: false
+
+server:
+  type: http
+  config:
+    addr: ":8080"
+
+store:
+  type: sqlite
+  config:
+    path: ./data/agentbox.db
+
+storage:
+  type: local
+  config:
+    root: ./data/artifacts
+
+executor:
+  type: local
+  config:
+    work_dir: /tmp/abox-sessions
+
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+  allow_credentials: true
