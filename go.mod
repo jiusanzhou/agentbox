@@ -17,7 +17,8 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/mattn/go-sqlite3 v1.14.34
 	github.com/prometheus/client_golang v1.23.2
-	github.com/slack-go/slack v0.19.0
+	github.com/robfig/cron/v3 v3.0.1
+	github.com/slack-go/slack v0.23.1
 	github.com/stripe/stripe-go/v82 v82.5.1
 	go.zoe.im/x v0.13.0
 	golang.org/x/crypto v0.48.0
@@ -92,7 +93,6 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
-	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/sirupsen/logrus v1.2.0 // indirect
 	github.com/spf13/cast v1.7.0 // indirect
