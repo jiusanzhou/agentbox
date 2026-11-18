@@ -12,6 +12,7 @@
     "enabled": true
   },
   "routes": [
-    { "pattern": "abox.wencai.app/*", "zone_name": "wencai.app" }
+    { "pattern": "abox.wencai.app/*", "zone_name": "wencai.app" },
+    { "pattern": "abox.zoe.im/*", "zone_name": "zoe.im" }
   ]
 }
